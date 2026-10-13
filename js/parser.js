@@ -99,7 +99,8 @@
     const maxC = Math.min(ws.columnCount, 150);
     for (let r = 1; r <= maxR; r++) {
       for (let c = 1; c <= maxC; c++) {
-        if (!NO_HEADERS.includes(txt(ws.getCell(r, c)))) continue;
+        // 並べ替えの印（台番▲など）は外して比べる
+        if (!NO_HEADERS.includes(txt(ws.getCell(r, c)).replace(/[▲▼△▽↑↓\s]/g, ''))) continue;
         for (let d = 1; d <= 3; d++) {
           if (txt(ws.getCell(r, c + d)).includes('機種')) { res.push({ r, c }); break; }
         }
@@ -121,8 +122,10 @@
       else if (!cols.out && t.includes('アウト')) cols.out = x;
       else if (!cols.safe && (t.includes('セーフ') || t === 'BO' || t.includes('払出'))) cols.safe = x;
       else if (!cols.diff && t.includes('差')) { cols.diff = x; cols.diffLabel = t; }
+      // 「総G数」があればそれを優先（「通常G数」はボーナス中を含まないので使わない）
+      else if (/総G|総ゲーム/.test(t)) cols.games = x;
       else if (!cols.games && (t.includes('ゲーム') || t === 'G数' || t.includes('回転'))) cols.games = x;
-      else if (!cols.bb && t === 'BB') cols.bb = x;
+      else if (!cols.bb && (t === 'BB' || t.startsWith('特賞') || t.startsWith('BIG'))) cols.bb = x;
       else if (!cols.rb && t === 'RB') cols.rb = x;
       else if (!cols.setting && t.includes('設定')) cols.setting = x;
     }
@@ -301,7 +304,21 @@
     }
 
     // 朝一入場の人数と店舗様コメント（公式テンプレから読み込んだときは出力に引き継ぐ）
-    const meta = { entry: {}, comment: null };
+    // 出力ファイル名の初期値用に、店舗名（部店名の列）とシート上部の文字（抽出条件の日付など）も拾う
+    const meta = { entry: {}, comment: null, store: null, topText: '' };
+    for (let x = 1; x <= Math.min(ws.columnCount, 30); x++) {
+      if (/部店名|店舗名|ホール名|^店名$/.test(txt(ws.getCell(data.r, x))) && rows.length) {
+        const v = String(cellValue(ws.getCell(rows[0].row, x)) ?? '').trim();
+        if (v) { meta.store = v; break; }
+      }
+    }
+    const tops = [];
+    for (const sh of [ws, marksSheet && marksSheet.ws].filter(Boolean)) {
+      for (let r = 1; r <= Math.min(3, sh.rowCount); r++) {
+        for (let c = 1; c <= Math.min(sh.columnCount, 20); c++) { const t = txt(sh.getCell(r, c)); if (t) tops.push(t); }
+      }
+    }
+    meta.topText = tops.join(' ');
     for (let r = 1; r <= Math.min(10, ws.rowCount); r++) {
       for (let c = 1; c <= Math.min(30, ws.columnCount); c++) {
         const cell = ws.getCell(r, c);

@@ -70,9 +70,59 @@
   };
 
   // ---------- 読み込み ----------
-  async function loadBuffer(buffer, fileName) {
+  // 古い形式（.xls）はSheetJSで読み、ExcelJSのブックに移してから同じ処理にかける
+  const SHEETJS_URL = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+  function loadSheetJS() {
+    if (window.XLSX) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = SHEETJS_URL;
+      s.onload = resolve;
+      s.onerror = () => reject(new Error('.xls を読むための部品を読み込めませんでした（ネット接続を確認してください）'));
+      document.head.appendChild(s);
+    });
+  }
+
+  async function xlsToWorkbook(buffer) {
+    await loadSheetJS();
+    const src = XLSX.read(buffer, { type: 'array', cellStyles: true });
     const wb = new ExcelJS.Workbook();
-    await wb.xlsx.load(buffer.slice(0));
+    src.SheetNames.forEach((name, i) => {
+      const sws = src.Sheets[name];
+      const ws = wb.addWorksheet(name.replace(/[\[\]:*?\/\\]/g, '_').slice(0, 31) || `Sheet${i + 1}`);
+      const info = src.Workbook && src.Workbook.Sheets && src.Workbook.Sheets[i];
+      if (info && info.Hidden) ws.state = 'hidden';
+      if (!sws || !sws['!ref']) return;
+      const range = XLSX.utils.decode_range(sws['!ref']);
+      for (let r = range.s.r; r <= range.e.r; r++) {
+        for (let c = range.s.c; c <= range.e.c; c++) {
+          const cell = sws[XLSX.utils.encode_cell({ r, c })];
+          if (!cell) continue;
+          const x = ws.getCell(r + 1, c + 1);
+          if (cell.v != null) x.value = cell.t === 'd' ? new Date(cell.v) : cell.v;
+          const s = cell.s;
+          if (s && s.patternType && s.patternType !== 'none' && s.fgColor && s.fgColor.rgb) {
+            x.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF' + String(s.fgColor.rgb).slice(-6) } };
+          }
+        }
+      }
+      for (const m of sws['!merges'] || []) {
+        try { ws.mergeCells(m.s.r + 1, m.s.c + 1, m.e.r + 1, m.e.c + 1); } catch (e) { /* 重なる結合は無視 */ }
+      }
+    });
+    return wb;
+  }
+
+  async function loadBuffer(buffer, fileName) {
+    const head = new Uint8Array(buffer, 0, 2);
+    const isZip = head[0] === 0x50 && head[1] === 0x4B; // .xlsx は "PK" で始まる
+    let wb;
+    if (isZip) {
+      wb = new ExcelJS.Workbook();
+      await wb.xlsx.load(buffer.slice(0));
+    } else {
+      wb = await xlsToWorkbook(buffer);
+    }
     const parsed = P.parseWorkbook(wb, fileName);
     S.parsed = parsed;
     S.buffer = buffer;
@@ -83,12 +133,72 @@
     S.typeSource = parsed.typeGuess ? 'auto' : 'unknown';
     S.lenient = false;
     resolveTargets();
+    $('#out-date').value = guessDate(parsed);
+    $('#out-store').value = guessStore(parsed);
     $('#drop').hidden = true;
     $('#app').hidden = false;
     $('#btn-reset').hidden = false;
     renderSettings();
     run();
     return summaryText();
+  }
+
+  // ---------- 出力ファイル名（1010_店名_極.xlsx） ----------
+  const pad2 = n => String(n).padStart(2, '0');
+  const validMD = (m, d) => m >= 1 && m <= 12 && d >= 1 && d <= 31;
+
+  // ファイル名やシート上部（抽出条件の年月日など）から日付を推定。見つからなければ今日
+  function guessDate(p) {
+    const today = new Date();
+    const nfkc = t => (t ? t.normalize('NFKC') : '');
+    const names = [p.fileName.replace(/\.xls[xm]?$/i, ''), p.dataSheet, p.marksSheet].map(nfkc).filter(Boolean);
+    const all = [nfkc(p.meta.topText), ...names];
+    let y = null, md = null, m;
+    // 1) 「20261005」のような年月日（シート上部の抽出条件など）
+    for (const t of all) {
+      if ((m = t.match(/(20\d{2})(\d{2})(\d{2})/)) && validMD(+m[2], +m[3])) { y = +m[1]; md = [+m[2], +m[3]]; break; }
+    }
+    // 2) 「9月30日」
+    if (!md) for (const t of all) if ((m = t.match(/(\d{1,2})月(\d{1,2})日/)) && validMD(+m[1], +m[2])) { md = [+m[1], +m[2]]; break; }
+    // 3) ファイル名・シート名の「10.5」「1011」（データの数字と取り違えないよう、上部の文字は見ない）
+    if (!md) {
+      for (const t of names) {
+        if ((m = t.match(/(?:^|[^\d])(\d{1,2})[.\/](\d{1,2})(?!\d)/)) && validMD(+m[1], +m[2])) { md = [+m[1], +m[2]]; break; }
+        if ((m = t.match(/(?:^|[^\d])(\d{2})(\d{2})(?!\d)/)) && validMD(+m[1], +m[2])) { md = [+m[1], +m[2]]; break; }
+      }
+    }
+    if (!md) return `${today.getFullYear()}-${pad2(today.getMonth() + 1)}-${pad2(today.getDate())}`;
+    if (!y) {
+      // 年がない場合は今年。2か月以上先の日付になるなら去年とみなす
+      y = today.getFullYear();
+      if (new Date(y, md[0] - 1, md[1]) - today > 60 * 864e5) y--;
+    }
+    return `${y}-${pad2(md[0])}-${pad2(md[1])}`;
+  }
+
+  // 「部店名」の列か、ファイル名から日付・取材名などを除いた残りを店舗名の初期値にする
+  function guessStore(p) {
+    if (p.meta.store) return p.meta.store;
+    return p.fileName.normalize('NFKC')
+      .replace(/\.xls[xm]?$/i, '')
+      .replace(/_?(補填済|チェック結果|チェック済)(\s*\(\d+\))?$/, '')
+      .replace(/S級ホール調査|調査結果報告シート|結果報告シート|結果報告|ホール調査|\d+月以降/g, '')
+      .replace(/[（(][^）)]*[）)]/g, '')
+      .replace(/\d{1,2}月\d{1,2}日|20\d{6}|\d{1,2}[.\/]\d{1,2}|\b\d{3,4}\b|^\d{3,4}/g, '')
+      .replace(/データ|S級|極|虹|紫|赤|青/g, '')
+      .replace(/[\s_・\-]+/g, ' ')
+      .trim();
+  }
+
+  function outBaseName() {
+    const d = $('#out-date').value; // yyyy-mm-dd
+    const mmdd = d ? d.slice(5, 7) + d.slice(8, 10) : '';
+    const store = $('#out-store').value.trim().replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g, '');
+    return [mmdd, store, R.TYPES[S.type].label].filter(Boolean).join('_');
+  }
+
+  function renderOutName() {
+    $('#out-preview').textContent = outBaseName() + '.xlsx';
   }
 
   function resolveTargets() {
@@ -140,6 +250,7 @@
       `<span class="summary__big ${allOk ? 'is-ok' : 'is-ng'}">${allOk ? 'すべて達成' : `未達 ${judged.length - ok}件`}</span>` +
       `<span class="summary__sub">${R.TYPES[S.type].label}取材 ・ 達成 ${ok} / ${judged.length}</span>`;
     $('#btn-download').textContent = S.supp.size ? `補填版Excelをダウンロード（${S.supp.size}台）` : 'チェック結果をExcelでダウンロード';
+    renderOutName();
 
     renderSupp();
     $('#reqs').innerHTML = res.reqs.map(renderReq).join('');
@@ -321,6 +432,8 @@
     }
   });
   $('#tbl-search').addEventListener('input', e => { S.search = e.target.value; renderTable(); });
+  $('#out-date').addEventListener('input', renderOutName);
+  $('#out-store').addEventListener('input', renderOutName);
 
   // ---------- ファイル ----------
   const drop = $('#drop'), input = $('#file');
@@ -357,7 +470,7 @@
 
   function summaryText() {
     const res = S.result, p = S.parsed;
-    const lines = [`【公約チェック】${p.fileName.replace(/\.xlsx?$/i, '')}（${R.TYPES[S.type].label}）設置${S.ctx.N}台`];
+    const lines = [`【公約チェック】${outBaseName()} 設置${S.ctx.N}台`];
     for (const r of res.reqs) {
       const mark = { ok: '✅', ng: '❌', skip: '➖' }[r.status];
       lines.push(`${mark} ${r.no} ${r.title}`);
@@ -381,10 +494,9 @@
     btn.disabled = true;
     try {
       const blob = await X.build(S);
-      const base = S.parsed.fileName.replace(/\.xls[xm]?$/i, '');
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = `${base}_${S.supp.size ? '補填済' : 'チェック結果'}.xlsx`;
+      a.download = outBaseName() + '.xlsx';
       document.body.appendChild(a);
       a.click();
       setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);

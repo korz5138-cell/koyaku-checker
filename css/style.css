@@ -136,6 +136,22 @@ button, input, select { font: inherit; color: inherit; }
 .summary__sub { color: var(--muted); }
 .summary__actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
+/* 出力ファイル名 */
+.outname {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 10px 14px; margin-bottom: 16px; box-shadow: var(--shadow);
+}
+.outname__label { font-size: 12px; font-weight: 700; color: var(--muted); }
+.outname__field { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.outname__field span { color: var(--muted); }
+.outname__field input {
+  border: 1px solid var(--line); border-radius: 8px; background: var(--surface); padding: 5px 8px; min-width: 0;
+}
+.outname__field input[type="text"] { width: 14em; }
+.outname__preview { font-weight: 700; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.outname__preview::before { content: "→ "; color: var(--muted); font-weight: 400; }
+
 /* 補填中の台 */
 .supp { background: var(--supp-bg); border: 1px solid color-mix(in srgb, var(--supp) 35%, transparent); border-radius: var(--radius); padding: 10px 14px; margin-bottom: 16px; }
 .supp__head { font-weight: 700; color: var(--supp); margin-bottom: 6px; }

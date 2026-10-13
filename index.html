@@ -6,7 +6,7 @@
   <title>公約チェッカー</title>
   <meta name="robots" content="noindex">
   <!-- 更新したら ?v= の番号を変える（古いファイルがブラウザに残るのを防ぐ） -->
-  <link rel="stylesheet" href="css/style.css?v=20261013e">
+  <link rel="stylesheet" href="css/style.css?v=20261013f">
 </head>
 <body>
   <header class="topbar">
@@ -18,11 +18,11 @@
 
   <main class="wrap">
     <section id="drop" class="drop" tabindex="0">
-      <input id="file" type="file" accept=".xlsx,.xlsm" hidden>
+      <input id="file" type="file" accept=".xlsx,.xlsm,.xls" hidden>
       <div class="drop__icon" aria-hidden="true">
         <svg viewBox="0 0 24 24" width="40" height="40"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M12 16V4m0 0-4 4m4-4 4 4M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>
       </div>
-      <p class="drop__title">結果報告シート（Excel）をここにドロップ</p>
+      <p class="drop__title">結果報告シート（Excel：.xlsx / .xls）をここにドロップ</p>
       <p class="drop__sub">またはクリックしてファイルを選択 ・ データはこのパソコンの中だけで処理されます</p>
       <p id="drop-error" class="drop__error" hidden></p>
     </section>
@@ -51,6 +51,13 @@
           <button id="btn-copy" class="btn">結果をコピー</button>
           <button id="btn-download" class="btn btn--primary">Excelをダウンロード</button>
         </div>
+      </section>
+
+      <section class="outname" aria-label="出力ファイル名">
+        <span class="outname__label">出力ファイル名</span>
+        <label class="outname__field"><span>日付</span><input type="date" id="out-date"></label>
+        <label class="outname__field"><span>店舗名</span><input type="text" id="out-store" placeholder="任意（例：PIA大森）"></label>
+        <span class="outname__preview" id="out-preview"></span>
       </section>
 
       <section id="supp" class="supp" hidden></section>
@@ -97,11 +104,11 @@
   <div id="toast" class="toast" hidden></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
-  <script src="js/config.js?v=20261013e"></script>
-  <script src="data/payout6.js?v=20261013e"></script>
-  <script src="js/parser.js?v=20261013e"></script>
-  <script src="js/rules.js?v=20261013e"></script>
-  <script src="js/export.js?v=20261013e"></script>
-  <script src="js/app.js?v=20261013e"></script>
+  <script src="js/config.js?v=20261013f"></script>
+  <script src="data/payout6.js?v=20261013f"></script>
+  <script src="js/parser.js?v=20261013f"></script>
+  <script src="js/rules.js?v=20261013f"></script>
+  <script src="js/export.js?v=20261013f"></script>
+  <script src="js/app.js?v=20261013f"></script>
 </body>
 </html>
