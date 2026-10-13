@@ -11,6 +11,10 @@
   const gamesOf = m => (m.games != null ? { v: m.games, est: false } : m.out != null ? { v: m.out / 3, est: true } : null);
   const fmtGames = g => (g ? `${g.est ? '約' : ''}${fmtNum(g.v)}G` : '');
   const avg = list => (list.length ? list.reduce((s, x) => s + x, 0) / list.length : null);
+  // 元のシートの印（赤＝⑥・黄＝⑤で塗り分けたファイルのときは設定を表示）
+  const settingBadge = m => (m.setting === 6 ? '<span class="badge badge--s6">⑥</span>'
+    : m.setting === 5 ? '<span class="badge badge--s5">⑤</span>'
+      : '<span class="badge badge--orig">⑤⑥</span>');
   function avgLine(units, label) {
     const d = avg(units.map(m => m.diff).filter(v => v != null));
     const gs = units.map(gamesOf).filter(Boolean);
@@ -135,6 +139,7 @@
     resolveTargets();
     $('#out-date').value = guessDate(parsed);
     $('#out-store').value = guessStore(parsed);
+    resetPision();
     $('#drop').hidden = true;
     $('#app').hidden = false;
     $('#btn-reset').hidden = false;
@@ -199,6 +204,95 @@
 
   function renderOutName() {
     $('#out-preview').textContent = outBaseName() + '.xlsx';
+    const d = $('#out-date').value;
+    $('#pision-date').textContent = d ? `${+d.slice(5, 7)}/${+d.slice(8, 10)}` : '未入力';
+  }
+
+  // ---------- pision連携 ----------
+  const PS = window.KoyakuPision;
+  let psHalls = PS.cachedHalls();
+
+  function renderPisionKey() {
+    const has = !!PS.getKey();
+    $('#pision-key').value = '';
+    $('#pision-key').placeholder = has ? '保存済み（変えるときだけ入力）' : 'pisionのAPIキー';
+    $('#pision-key-state').textContent = has ? '保存済み' : '未設定';
+    $('#pision-key-state').classList.toggle('is-ok', has);
+    $('#pision-key-del').hidden = !has;
+  }
+  function fillHallList() {
+    if (psHalls) $('#pision-halls').innerHTML = psHalls.map(h => `<option value="${esc(PS.hallLabel(h))}"></option>`).join('');
+  }
+  async function ensureHalls() {
+    if (!psHalls) { psHalls = await PS.halls(); fillHallList(); }
+    return psHalls;
+  }
+  // 店舗の初期値は「出力ファイル名」の店舗名から
+  function prefillHall() {
+    if (!psHalls || $('#pision-hall').value) return;
+    const h = PS.guessHall(psHalls, $('#out-store').value);
+    if (h) $('#pision-hall').value = PS.hallLabel(h);
+  }
+  function pisionMessage(text, isError) {
+    const el = $('#pision-result');
+    el.hidden = !text;
+    el.textContent = text || '';
+    el.classList.toggle('is-error', !!isError);
+  }
+  function resetPision() {
+    S.pision = null;
+    $('#pision-hall').value = '';
+    $('#pision-undo').hidden = true;
+    $('#pision-badge').hidden = true;
+    pisionMessage('');
+    prefillHall();
+  }
+
+  async function fetchPision() {
+    const btn = $('#pision-fetch');
+    btn.disabled = true;
+    pisionMessage('pisionからデータを取得しています…');
+    try {
+      const halls = await ensureHalls();
+      const text = $('#pision-hall').value;
+      const hall = PS.findHall(halls, text) || PS.guessHall(halls, text || $('#out-store').value);
+      if (!hall) throw new Error('店舗を一覧から選んでください（店名を入力すると候補が出ます）');
+      $('#pision-hall').value = PS.hallLabel(hall);
+      const date = $('#out-date').value;
+      if (!date) throw new Error('「出力ファイル名」の日付を入れてください');
+      const details = await PS.results(hall.id, date);
+      if (S.pision) PS.undo(S.parsed.machines, S.ctx.models); // 取り直すときは元の値から
+      const st = PS.apply(S.parsed.machines, S.ctx.models, details);
+      S.pision = { hall, date, st };
+      payCache.clear();
+      renderSettings();
+      run();
+      const parts = [
+        `${hall.name}・${+date.slice(5, 7)}/${+date.slice(8, 10)} のpisionデータと照合しました（${st.matched}/${st.total}台が一致）。`,
+        `BB ${st.bb}台・RB ${st.rb}台・G数 ${st.games}台を補い、機種名を${st.renamed}機種置き換えました。`,
+      ];
+      if (st.missing.length) parts.push(`pisionに無かった台番号：${st.missing.slice(0, 12).join('、')}${st.missing.length > 12 ? ` ほか${st.missing.length - 12}台` : ''}`);
+      if (st.matched < st.total * 0.5) parts.push('※一致した台が少ないので、店舗と日付が合っているか確認してください。');
+      pisionMessage(parts.join(' '), st.matched < st.total * 0.5);
+      $('#pision-undo').hidden = false;
+      $('#pision-badge').hidden = false;
+      $('#pision-badge').textContent = '取得済み';
+    } catch (e) {
+      pisionMessage(e.message || String(e), true);
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  function undoPision() {
+    PS.undo(S.parsed.machines, S.ctx.models);
+    S.pision = null;
+    payCache.clear();
+    renderSettings();
+    run();
+    $('#pision-undo').hidden = true;
+    $('#pision-badge').hidden = true;
+    pisionMessage('pisionで補った値と機種名を元に戻しました。');
   }
 
   function resolveTargets() {
@@ -225,7 +319,9 @@
       `書式 <b>${esc(p.formatLabel)}</b>`,
       `シート <b>${esc(p.dataSheet)}</b>`,
       `設置 <b>${S.ctx.N}台</b>（${S.ctx.models.length}機種）`,
-      `⑤⑥ <b>${origCnt}台</b>${S.supp.size ? `＋補填 <b>${S.supp.size}台</b>` : ''}`,
+      p.settingColors
+        ? `⑥ <b>${p.machines.filter(m => m.orig && m.setting === 6).length}台</b>・⑤ <b>${p.machines.filter(m => m.orig && m.setting === 5).length}台</b>（赤＝⑥・黄＝⑤）${S.supp.size ? `＋補填 <b>${S.supp.size}台</b>` : ''}`
+        : `⑤⑥ <b>${origCnt}台</b>${S.supp.size ? `＋補填 <b>${S.supp.size}台</b>` : ''}`,
     ].map(s => `<span>${s}</span>`).join('');
     document.querySelectorAll('.type').forEach(b => b.setAttribute('aria-checked', String(b.dataset.type === S.type)));
     const hint = $('#type-hint');
@@ -273,7 +369,7 @@
     return `<label class="mrow${orig ? ' is-orig' : ''}${supp ? ' is-supp' : ''}">` +
       `<input type="checkbox" data-i="${m.i}"${orig || supp ? ' checked' : ''}${orig ? ' disabled' : ''}>` +
       `<span class="mrow__no">${m.no}</span>` +
-      `<span class="mrow__name" title="${esc(m.name)}">${esc(m.name)}${orig ? ' <span class="badge badge--orig">⑤⑥</span>' : ''}</span>` +
+      `<span class="mrow__name" title="${esc(m.name)}">${esc(m.name)}${orig ? ' ' + settingBadge(m) : ''}</span>` +
       `<span class="mrow__diff">${fmtDiff(m.diff)}</span>` +
       `<span class="mrow__g">${fmtGames(gamesOf(m))}</span>` +
       `</label>`;
@@ -349,7 +445,7 @@
         return `<tr class="${supp ? 'is-supp' : ''}">` +
           `<td><input type="checkbox" data-i="${m.i}"${on ? ' checked' : ''}${m.orig ? ' disabled' : ''}></td>` +
           `<td class="num">${m.no}</td><td class="name">${esc(m.name)}</td><td class="num">${m.model.n}</td>` +
-          `<td>${tag ? `<span class="tag">${esc(tag)}</span>` : ''}${supp ? ' <span class="badge badge--supp">補填</span>' : ''}</td>` +
+          `<td>${m.orig ? settingBadge(m) + ' ' : ''}${tag ? `<span class="tag">${esc(tag)}</span>` : ''}${supp ? ' <span class="badge badge--supp">補填</span>' : ''}</td>` +
           `<td class="num">${fmtDiff(m.diff)}</td><td class="num">${fmtGames(gamesOf(m))}</td>` +
           `<td>${esc((m.declared || '').replace(/\s+/g, ' ').slice(0, 24))}</td></tr>`;
       }).join('') + '</tbody>';
@@ -434,6 +530,24 @@
   $('#tbl-search').addEventListener('input', e => { S.search = e.target.value; renderTable(); });
   $('#out-date').addEventListener('input', renderOutName);
   $('#out-store').addEventListener('input', renderOutName);
+
+  renderPisionKey();
+  fillHallList();
+  $('#pision-key-save').addEventListener('click', async () => {
+    const v = $('#pision-key').value.trim();
+    if (!v) return pisionMessage('APIキーを入力してから「保存」を押してください', true);
+    PS.setKey(v);
+    renderPisionKey();
+    pisionMessage('');
+    try { await ensureHalls(); prefillHall(); } catch (e) { pisionMessage(e.message, true); }
+  });
+  $('#pision-key-del').addEventListener('click', () => { PS.setKey(''); renderPisionKey(); });
+  $('#pision').addEventListener('toggle', async () => {
+    if (!$('#pision').open || !PS.getKey()) return;
+    try { await ensureHalls(); prefillHall(); } catch (e) { pisionMessage(e.message, true); }
+  });
+  $('#pision-fetch').addEventListener('click', fetchPision);
+  $('#pision-undo').addEventListener('click', undoPision);
 
   // ---------- ファイル ----------
   const drop = $('#drop'), input = $('#file');

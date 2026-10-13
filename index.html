@@ -6,7 +6,7 @@
   <title>公約チェッカー</title>
   <meta name="robots" content="noindex">
   <!-- 更新したら ?v= の番号を変える（古いファイルがブラウザに残るのを防ぐ） -->
-  <link rel="stylesheet" href="css/style.css?v=20261013f">
+  <link rel="stylesheet" href="css/style.css?v=20261013h">
 </head>
 <body>
   <header class="topbar">
@@ -60,6 +60,27 @@
         <span class="outname__preview" id="out-preview"></span>
       </section>
 
+      <details id="pision" class="panel pision-panel">
+        <summary>pision連携（BB・RB・G数を補う／機種名を正式名にする）<span id="pision-badge" class="pision__badge" hidden></span></summary>
+        <div class="panel__body pision">
+          <div class="pision__row">
+            <label class="outname__field"><span>APIキー</span><input type="password" id="pision-key" placeholder="pisionのAPIキー" autocomplete="off" spellcheck="false"></label>
+            <button class="btn btn--sm" id="pision-key-save" type="button">保存</button>
+            <button class="btn btn--sm btn--ghost" id="pision-key-del" type="button" hidden>削除</button>
+            <span class="pision__note" id="pision-key-state"></span>
+          </div>
+          <div class="pision__row">
+            <label class="outname__field pision__hall"><span>店舗</span><input type="search" id="pision-hall" list="pision-halls" placeholder="店名で検索（例：PIA大森）" autocomplete="off"></label>
+            <datalist id="pision-halls"></datalist>
+            <span class="pision__note">日付：<b id="pision-date"></b>（出力ファイル名の日付）</span>
+            <button class="btn btn--primary btn--sm" id="pision-fetch" type="button">pisionから取得</button>
+            <button class="btn btn--sm" id="pision-undo" type="button" hidden>元に戻す</button>
+          </div>
+          <div id="pision-result" class="pision__result" hidden></div>
+          <p class="pision__help">キーはこのブラウザの中だけに保存されます（公開サイトや出力ファイルには入りません）。BB・RB・G数はシートで空欄の台だけ埋め、機種名はpisionの正式名に置き換えます。判定のときの機種のまとめ方は変わりません。</p>
+        </div>
+      </details>
+
       <section id="supp" class="supp" hidden></section>
 
       <section id="reqs" class="reqs"></section>
@@ -74,6 +95,7 @@
         <div class="panel__body rules">
           <ul>
             <li>⭕️（色塗り）の台は⑤⑥、①の対象機種に数える台は⑥とみなします（シートからは⑤と⑥を区別できないため）。</li>
+            <li>赤と黄色の2色で塗り分けたファイルは、赤＝⑥・黄色＝⑤として読みます。①の「⑥あり」と紫②の「全⑥」は⑥の台だけで数え、出力のExcelでも⭕️と台番号を赤・黄色で塗ります。</li>
             <li>1台を複数の公約に数えません（被りなし）。ただし極②「4台以上機種に1台以上」は、他の公約の台でも満たせる扱いです。</li>
             <li>どの台をどの公約に数えるかは、達成数が最も多くなる割り振りを自動で探します。シートの⭕️の列やメモとは違う割り振りになることがあります。</li>
             <li>「1/2」「1/5」「4%」「8%」は切り上げで数えます（例：13台の1/2は7台）。</li>
@@ -104,11 +126,12 @@
   <div id="toast" class="toast" hidden></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
-  <script src="js/config.js?v=20261013f"></script>
-  <script src="data/payout6.js?v=20261013f"></script>
-  <script src="js/parser.js?v=20261013f"></script>
-  <script src="js/rules.js?v=20261013f"></script>
-  <script src="js/export.js?v=20261013f"></script>
-  <script src="js/app.js?v=20261013f"></script>
+  <script src="js/config.js?v=20261013h"></script>
+  <script src="data/payout6.js?v=20261013h"></script>
+  <script src="js/parser.js?v=20261013h"></script>
+  <script src="js/rules.js?v=20261013h"></script>
+  <script src="js/export.js?v=20261013h"></script>
+  <script src="js/pision.js?v=20261013h"></script>
+  <script src="js/app.js?v=20261013h"></script>
 </body>
 </html>

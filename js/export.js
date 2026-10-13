@@ -11,6 +11,8 @@
   const TEMPLATE_LAST_ROW = 557; // テンプレートの数式が入っている最終行
 
   const solid = argb => ({ type: 'pattern', pattern: 'solid', fgColor: { argb } });
+  const RED = solid('FFFF0000');
+  const YELLOW = solid('FFFFFF00');
   // 読み込んだファイルでは同じ書式のセルがスタイルを共有しているため、複製してから塗る
   const setFill = (cell, fill) => { cell.style = Object.assign({}, cell.style, { fill }); };
   const text = cell => {
@@ -120,9 +122,11 @@
       if (m.orig || supp) {
         const cell = ws.getCell(r, pickByTag(cats, tagOf(m)).c);
         cell.value = '⭕️';
-        if (supp) {
-          setFill(cell, fill);
-          setFill(ws.getCell(r, col.no), fill);
+        // 補填は水色。元のファイルが赤＝⑥・黄＝⑤の塗り分けなら、その色を付ける
+        const color = supp ? fill : m.setting === 6 ? RED : m.setting === 5 ? YELLOW : null;
+        if (color) {
+          setFill(cell, color);
+          setFill(ws.getCell(r, col.no), color);
         }
       }
       r++;

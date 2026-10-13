@@ -235,7 +235,7 @@
       rows.push(r);
     }
 
-    let format, catCols = [], annC = null;
+    let format, catCols = [], annC = null, settingColors = false;
     const machines = rows.map((r, i) => ({ ...r, i, key: P.normKey(r.name), orig: false, declared: null }));
 
     if (marksSheet) {
@@ -262,6 +262,7 @@
           if (!isSlave(cell) && isCircle(cellValue(cell))) {
             m.orig = true;
             if (!m.declared) m.declared = cc.label;
+            if (!m.fillKey) m.fillKey = fillKey(cell) || fillKey(ws.getCell(m.row, data.cols.no));
             circles++;
           }
         }
@@ -279,7 +280,7 @@
         }
         for (const m of machines) {
           const k = keyOf(m);
-          if (k && freq.get(k) <= machines.length * 0.6) m.orig = true;
+          if (k && freq.get(k) <= machines.length * 0.6) { m.orig = true; m.fillKey = k; }
         }
         // メモ列：表の右側で文字が入っている列
         for (let x = data.cols.last + 1; x <= data.cols.last + 4 && annC == null; x++) {
@@ -300,6 +301,26 @@
           }
           if (cur && m.orig) m.declared = cur.text;
         }
+      }
+    }
+
+    // 赤と黄色の2色で塗り分けている場合だけ、赤＝⑥・黄色＝⑤として設定を読み取る
+    // （書式Bは台番号の塗り、書式A＝このツールの出力は⭕️のセルの塗り）
+    const colorKind = k => {
+      const rgb = k && k.startsWith('rgb:') ? k.slice(4) : null;
+      if (!rgb) return null;
+      const [r, g, b] = [0, 2, 4].map(i => parseInt(rgb.slice(i, i + 2), 16));
+      if (r >= 0xC0 && g <= 0x70 && b <= 0x70) return 'red';
+      if (r >= 0xE0 && g >= 0xD0 && b <= 0x80) return 'yellow';
+      return null;
+    };
+    const kinds = new Set(machines.filter(m => m.orig).map(m => colorKind(m.fillKey)));
+    if (kinds.has('red') && kinds.has('yellow')) {
+      settingColors = true;
+      for (const m of machines) {
+        if (!m.orig) continue;
+        const kind = colorKind(m.fillKey);
+        if (kind) m.setting = kind === 'red' ? 6 : 5;
       }
     }
 
@@ -348,6 +369,7 @@
       blocks: marksSheet ? marksSheet.blocks.map(b => ({ c: b.c, cols: b.cols, title: b.title, lastRow: Math.max(marksSheet.r, ...b.rows.map(e => e.row)) })) : null,
       typeGuess,
       machines,
+      settingColors,
       meta,
       warnings,
     };

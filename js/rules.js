@@ -74,9 +74,12 @@
     return segs;
   }
 
-  // 機種 g から k 台を公約に割り当てる。4台並びを崩さない台を優先する
-  function consume(g, k, tag, st, isMarked) {
-    const free = m => isMarked(m) && !st.used.has(m);
+  // ⑥とみなせる台（ファイルで⑤と分かっている台以外）
+  const is6 = m => m.setting !== 5;
+
+  // 機種 g から k 台を公約に割り当てる。4台並びを崩さない台を優先する（only で使える台を絞れる）
+  function consume(g, k, tag, st, isMarked, only) {
+    const free = m => isMarked(m) && !st.used.has(m) && (!only || only(m));
     const picked = [];
     for (let t = 0; t < k; t++) {
       let best = null, bestLoss = Infinity, bestLen = Infinity;
@@ -102,13 +105,14 @@
     return o.targets.map(t => {
       const g = t.model;
       if (!g) return { t, status: 'none' };
-      if (g === half) return { t, status: 'ok', via: 'half' };
+      // 1/2機種も⑥が1台は必要（⑤と分かっている台だけなら未達）
+      if (g === half) return { t, status: g.units.some(m => isMarked(m) && is6(m)) ? 'ok' : 'ng', via: 'half' };
       if (strict) {
-        const p = consume(g, 1, 't6', st, isMarked);
+        const p = consume(g, 1, 't6', st, isMarked, is6);
         return { t, status: p.length ? 'ok' : 'ng', machine: p[0] };
       }
-      // 兼用OK：⑤⑥が1台でもあれば達成（割り当ては最後に決める）
-      return { t, status: g.units.some(isMarked) ? 'ok' : 'ng', lenient: true };
+      // 兼用OK：⑥が1台でもあれば達成（割り当ては最後に決める）
+      return { t, status: g.units.some(m => isMarked(m) && is6(m)) ? 'ok' : 'ng', lenient: true };
     });
   }
 
@@ -117,9 +121,9 @@
     for (const x of items) {
       if (!x.lenient || x.status !== 'ok') continue;
       const g = x.t.model;
-      const free = g.units.find(m => isMarked(m) && !st.used.has(m));
+      const free = g.units.find(m => isMarked(m) && is6(m) && !st.used.has(m));
       if (free) { st.used.set(free, 't6'); x.machine = free; }
-      else { x.machine = g.units.find(isMarked); x.shared = true; }
+      else { x.machine = g.units.find(m => isMarked(m) && is6(m)); x.shared = true; }
     }
     if (half) for (const m of half.units) if (isMarked(m) && !st.used.has(m)) st.used.set(m, 'thalf');
   }
@@ -140,6 +144,8 @@
           return { s: 'ok', t: `${nm}：⑥あり（${where}）` };
         }
         const c = markedCnt(g, o.isMarked);
+        const c6 = g.units.filter(m => o.isMarked(m) && is6(m)).length;
+        if (c && !c6) return { s: 'ng', t: `${nm}：⑥なし（${g.n}台中 ⑤のみ${c}台）` };
         return { s: 'ng', t: `${nm}：⑥なし（${g.n}台中 ⑤⑥${c}台${c ? '・すべて他の公約で使用' : ''}）` };
       }),
       // 空き台がなく補填できない未達は重く数え、補填できる割り振りを優先させる
@@ -231,7 +237,7 @@
     const targets = new Set(o.targets.map(t => t.model).filter(Boolean));
     for (const m of ctx.machines) {
       if (!isMarked(m) || st.used.has(m)) continue;
-      st.used.set(m, targets.has(m.model) ? 't6' : bigTag && m.model.n >= 4 ? bigTag : 'other');
+      st.used.set(m, targets.has(m.model) && is6(m) ? 't6' : bigTag && m.model.n >= 4 ? bigTag : 'other');
     }
     return st.used;
   }
@@ -329,7 +335,8 @@
   function solveMurasaki(ctx, o) {
     const evals = [];
     for (const half of halfOptions(o)) {
-      const m2opts = [null, ...ctx.models.filter(g => g !== half && o.is1149(g) && isFull(g, o.isMarked))];
+      // 全⑥なので、⑤と分かっている台がある機種は対象外
+      const m2opts = [null, ...ctx.models.filter(g => g !== half && o.is1149(g) && isFull(g, o.isMarked) && g.units.every(is6))];
       for (const m2 of m2opts) evals.push(evalMurasaki(ctx, o, half, m2));
     }
     return pickBest(evals);
