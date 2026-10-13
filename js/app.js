@@ -7,6 +7,18 @@
   const fmtDiff = n => (n == null ? '' : `<span class="${n >= 0 ? 'plus' : 'minus'}">${n > 0 ? '+' : ''}${fmtNum(n)}</span>`);
   const STATUS = { ok: '達成', ng: '未達', skip: '対象外' };
 
+  // G数。シートにない場合（ホール出力の書式など）はアウト÷3で推定し「約」を付ける
+  const gamesOf = m => (m.games != null ? { v: m.games, est: false } : m.out != null ? { v: m.out / 3, est: true } : null);
+  const fmtGames = g => (g ? `${g.est ? '約' : ''}${fmtNum(g.v)}G` : '');
+  const avg = list => (list.length ? list.reduce((s, x) => s + x, 0) / list.length : null);
+  function avgLine(units, label) {
+    const d = avg(units.map(m => m.diff).filter(v => v != null));
+    const gs = units.map(gamesOf).filter(Boolean);
+    const g = gs.length ? { v: avg(gs.map(x => x.v)), est: gs.some(x => x.est) } : null;
+    if (d == null && !g) return '';
+    return `<div class="cgroup__avg">${esc(label)}：差枚 ${d != null ? fmtDiff(d) : '－'} ／ ${g ? fmtGames(g) : '－'}</div>`;
+  }
+
   const store = {
     get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* 保存できなくても動作は続ける */ } },
@@ -151,7 +163,7 @@
       `<span class="mrow__no">${m.no}</span>` +
       `<span class="mrow__name" title="${esc(m.name)}">${esc(m.name)}${orig ? ' <span class="badge badge--orig">⑤⑥</span>' : ''}</span>` +
       `<span class="mrow__diff">${fmtDiff(m.diff)}</span>` +
-      `<span class="mrow__g">${m.games != null ? fmtNum(m.games) + 'G' : ''}</span>` +
+      `<span class="mrow__g">${fmtGames(gamesOf(m))}</span>` +
       `</label>`;
   }
 
@@ -168,6 +180,7 @@
               `<span class="need">${esc(g.needText)}</span>` +
               (g.selectAll && selectable.length ? `<button class="btn btn--sm" data-sel="${selectable.map(m => m.i).join(',')}">まとめて選ぶ</button>` : '') +
               `</div>` +
+              (g.model ? avgLine(g.model.units, `機種平均（${g.model.n}台）`) : g.avgUnits ? avgLine(g.avgUnits, `${g.avgUnits.length}台の平均`) : '') +
               (g.note ? `<div class="cgroup__note">${esc(g.note)}</div>` : '') +
               (g.machines.length ? `<div class="mlist">${g.machines.map(machineRow).join('')}</div>` : '') +
               `</div>`;
@@ -200,7 +213,7 @@
           `<td><input type="checkbox" data-i="${m.i}"${on ? ' checked' : ''}${m.orig ? ' disabled' : ''}></td>` +
           `<td class="num">${m.no}</td><td class="name">${esc(m.name)}</td><td class="num">${m.model.n}</td>` +
           `<td>${tag ? `<span class="tag">${esc(tag)}</span>` : ''}${supp ? ' <span class="badge badge--supp">補填</span>' : ''}</td>` +
-          `<td class="num">${fmtDiff(m.diff)}</td><td class="num">${m.games != null ? fmtNum(m.games) : ''}</td>` +
+          `<td class="num">${fmtDiff(m.diff)}</td><td class="num">${fmtGames(gamesOf(m))}</td>` +
           `<td>${esc((m.declared || '').replace(/\s+/g, ' ').slice(0, 24))}</td></tr>`;
       }).join('') + '</tbody>';
   }
