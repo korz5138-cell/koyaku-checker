@@ -96,7 +96,7 @@
   function findHeaders(ws) {
     const res = [];
     const maxR = Math.min(ws.rowCount, 60);
-    const maxC = Math.min(ws.columnCount, 150);
+    const maxC = Math.min(colsOf(ws), 150);
     for (let r = 1; r <= maxR; r++) {
       for (let c = 1; c <= maxC; c++) {
         // 並べ替えの印（台番▲など）は外して比べる
@@ -132,9 +132,24 @@
     return cols;
   }
 
+  // 読む行の終わり（書式だけが最終行まで入ったシートもあるので打ち切る）。
+  // actualRowCount は呼ぶたびに全行を数えるので、シートごとに1回だけ計算して覚えておく
+  const lastRowCache = new WeakMap();
+  const lastRowOf = ws => {
+    if (!lastRowCache.has(ws)) lastRowCache.set(ws, Math.min(ws.rowCount, (ws.actualRowCount || ws.rowCount) + 500, 20000));
+    return lastRowCache.get(ws);
+  };
+  // columnCount も呼ぶたびに全行を見るので、シートごとに1回だけ
+  const colCache = new WeakMap();
+  const colsOf = ws => {
+    if (!colCache.has(ws)) colCache.set(ws, ws.columnCount);
+    return colCache.get(ws);
+  };
+
   function readRows(ws, hdrRow, cols) {
     const rows = [];
-    for (let r = hdrRow + 1; r <= ws.rowCount; r++) {
+    const last = lastRowOf(ws);
+    for (let r = hdrRow + 1; r <= last; r++) {
       const no = toInt(cellValue(ws.getCell(r, cols.no)));
       if (no == null) continue;
       const g = x => (x ? cellValue(ws.getCell(r, x)) : null);
@@ -158,6 +173,36 @@
     return rows;
   }
 
+  // 書式D：「まとめ」のシート（区分・台番号・機種・アウト・セーフ・差の一覧）。全台データは別シート
+  // 見出しの「アウト」「セーフ」の2つ左が台番号、3つ左が区分（全台 機種・1/2 機種・４台並び など）。
+  // 台番号の8割以上が全台データにある一覧だけを使う。同じシートに一覧が2つあれば左のものだけ使う
+  function findMarkList(wb, dataWs, dataNos) {
+    for (const ws of wb.worksheets) {
+      if (ws === dataWs || (ws.state && ws.state !== 'visible')) continue;
+      const last = lastRowOf(ws);
+      for (let r = 1; r <= Math.min(last, 60); r++) {
+        for (let c = 3; c <= Math.min(colsOf(ws), 60); c++) {
+          if (txt(ws.getCell(r, c)) !== 'アウト' || !txt(ws.getCell(r, c + 1)).includes('セーフ')) continue;
+          const noC = c - 2, labelC = c - 3;
+          const entries = [];
+          let label = null, prevLabelOnly = false, ints = 0;
+          for (let rr = r + 1; rr <= last; rr++) {
+            const no = toInt(cellValue(ws.getCell(rr, noC)));
+            const lab = labelC >= 1 ? txt(ws.getCell(rr, labelC)) : '';
+            if (no == null && !lab) { prevLabelOnly = false; label = null; continue; }
+            // 区分は次の空行まで続く。台番号の無い区分だけの行のすぐ下は、つなげる（「３台機種から」「1/3 機種」など）
+            if (lab) label = prevLabelOnly && label ? `${label} ${lab}` : lab;
+            prevLabelOnly = !!lab && no == null;
+            if (no != null) { ints++; entries.push({ no, label }); }
+          }
+          const hit = entries.filter(e => dataNos.has(e.no)).length;
+          if (hit >= 3 && hit >= ints * 0.8) return { ws, r, entries };
+        }
+      }
+    }
+    return null;
+  }
+
   // 取材の種類をテキストから推定
   function guessType(texts) {
     for (const t of texts) {
@@ -174,7 +219,7 @@
   function topTexts(ws, rows) {
     const out = [];
     for (let r = 1; r <= Math.min(rows, ws.rowCount); r++) {
-      for (let c = 1; c <= Math.min(ws.columnCount, 20); c++) {
+      for (let c = 1; c <= Math.min(colsOf(ws), 20); c++) {
         const t = txt(ws.getCell(r, c));
         if (t && /S級|調査|結果報告/.test(t)) out.push(t);
       }
@@ -304,6 +349,23 @@
       }
     }
 
+    // 書式D：全台データのシートに印が無く、別の「まとめ」シートに仕掛け台の一覧があるとき
+    let markList = null;
+    if (format !== 'C' && !machines.some(m => m.orig)) {
+      markList = findMarkList(wb, ws, new Set(machines.map(m => m.no)));
+      if (markList) {
+        format = 'D';
+        catCols = [];
+        const byNo = new Map(machines.map(m => [m.no, m]));
+        for (const e of markList.entries) {
+          const m = byNo.get(e.no);
+          if (!m) { warnings.push(`まとめの台番号 ${e.no} が全台データにありません`); continue; }
+          m.orig = true;
+          if (!m.declared && e.label) m.declared = e.label;
+        }
+      }
+    }
+
     // 赤と黄色の2色で塗り分けている場合だけ、赤＝⑥・黄色＝⑤として設定を読み取る
     // （書式Bは台番号の塗り、書式A＝このツールの出力は⭕️のセルの塗り）
     const colorKind = k => {
@@ -327,41 +389,55 @@
     // 朝一入場の人数と店舗様コメント（公式テンプレから読み込んだときは出力に引き継ぐ）
     // 出力ファイル名の初期値用に、店舗名（部店名の列）とシート上部の文字（抽出条件の日付など）も拾う
     const meta = { entry: {}, comment: null, store: null, topText: '' };
-    for (let x = 1; x <= Math.min(ws.columnCount, 30); x++) {
+    for (let x = 1; x <= Math.min(colsOf(ws), 30); x++) {
       if (/部店名|店舗名|ホール名|^店名$/.test(txt(ws.getCell(data.r, x))) && rows.length) {
         const v = String(cellValue(ws.getCell(rows[0].row, x)) ?? '').trim();
         if (v) { meta.store = v; break; }
       }
     }
+    const markWs = format === 'C' ? marksSheet.ws : format === 'D' ? markList.ws : null;
     const tops = [];
-    for (const sh of [ws, marksSheet && marksSheet.ws].filter(Boolean)) {
+    for (const sh of [ws, markWs].filter(Boolean)) {
       for (let r = 1; r <= Math.min(3, sh.rowCount); r++) {
-        for (let c = 1; c <= Math.min(sh.columnCount, 20); c++) { const t = txt(sh.getCell(r, c)); if (t) tops.push(t); }
+        for (let c = 1; c <= Math.min(colsOf(sh), 20); c++) { const t = txt(sh.getCell(r, c)); if (t) tops.push(t); }
       }
     }
     meta.topText = tops.join(' ');
-    for (let r = 1; r <= Math.min(10, ws.rowCount); r++) {
-      for (let c = 1; c <= Math.min(30, ws.columnCount); c++) {
-        const cell = ws.getCell(r, c);
-        if (isSlave(cell)) continue;
-        const t = txt(cell);
-        if (['抽選(予約)', '再整列', '一般'].includes(t)) meta.entry[t] = toNum(cellValue(ws.getCell(r, c + 1)));
-        else if (t.startsWith('※店長カスタム') && !meta.comment) meta.comment = String(cellValue(cell));
+    // 右か下にある数字（「抽選人数」の下に 230 など）
+    const numNear = (sh, r, c) => {
+      const right = toNum(cellValue(sh.getCell(r, c + 1)));
+      return right != null ? right : toNum(cellValue(sh.getCell(r + 1, c)));
+    };
+    const ENTRY = { '抽選(予約)': '抽選(予約)', '抽選人数': '抽選(予約)', '再整列': '再整列', '一般': '一般', '一般人数': '一般' };
+    for (const sh of [ws, markWs].filter(Boolean)) {
+      for (let r = 1; r <= Math.min(10, sh.rowCount); r++) {
+        for (let c = 1; c <= Math.min(30, colsOf(sh)); c++) {
+          const cell = sh.getCell(r, c);
+          if (isSlave(cell)) continue;
+          const t = txt(cell);
+          if (ENTRY[t] && meta.entry[ENTRY[t]] == null) meta.entry[ENTRY[t]] = numNear(sh, r, c);
+          else if (t.startsWith('※店長カスタム') && !meta.comment) meta.comment = String(cellValue(cell));
+          // 「店名」の下（まとめのシートの A1 店名 / A2 ピーアーク三田 など）
+          else if (/^(店名|店舗名|ホール名)$/.test(t) && !meta.store) {
+            const v = String(cellValue(sh.getCell(r + 1, c)) ?? cellValue(sh.getCell(r, c + 1)) ?? '').trim();
+            if (v && !/^\d+$/.test(v)) meta.store = v;
+          }
+        }
       }
     }
 
     const typeGuess = guessType([
-      format === 'C' ? marksSheet.ws.name : ws.name,
-      ...topTexts(format === 'C' ? marksSheet.ws : ws, 5),
+      markWs ? markWs.name : ws.name,
+      ...topTexts(markWs || ws, 5),
       fileName,
     ]);
 
     return {
       fileName,
       format,
-      formatLabel: { A: '公式テンプレ（⭕️列）', B: 'ホール出力（色塗り）', C: 'ブロック形式' }[format],
+      formatLabel: { A: '公式テンプレ（⭕️列）', B: 'ホール出力（色塗り）', C: 'ブロック形式', D: 'まとめシート＋全台データ' }[format],
       dataSheet: ws.name,
-      marksSheet: marksSheet ? marksSheet.ws.name : null,
+      marksSheet: marksSheet ? marksSheet.ws.name : markList ? markList.ws.name : null,
       hdrRow: data.r,
       cols: data.cols,
       catCols,
