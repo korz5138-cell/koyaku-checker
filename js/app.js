@@ -233,6 +233,13 @@
     const h = PS.guessHall(psHalls, $('#out-store').value);
     if (h) $('#pision-hall').value = PS.hallLabel(h);
   }
+  // pisionで選んだ店の名前を、出力ファイル名の店舗名にも入れる
+  function hallToStore(hall) {
+    if (!hall) return;
+    $('#out-store').value = hall.name;
+    renderOutName();
+  }
+
   function pisionMessage(text, isError) {
     const el = $('#pision-result');
     el.hidden = !text;
@@ -258,6 +265,7 @@
       const hall = PS.findHall(halls, text) || PS.guessHall(halls, text || $('#out-store').value);
       if (!hall) throw new Error('店舗を一覧から選んでください（店名を入力すると候補が出ます）');
       $('#pision-hall').value = PS.hallLabel(hall);
+      hallToStore(hall);
       const date = $('#out-date').value;
       if (!date) throw new Error('「出力ファイル名」の日付を入れてください');
       const details = await PS.results(hall.id, date);
@@ -545,6 +553,10 @@
   $('#pision').addEventListener('toggle', async () => {
     if (!$('#pision').open || !PS.getKey()) return;
     try { await ensureHalls(); prefillHall(); } catch (e) { pisionMessage(e.message, true); }
+  });
+  // 候補から店を選んだとき（「店名（都道府県）#ID」の形になったとき）に店舗名へ反映
+  $('#pision-hall').addEventListener('input', () => {
+    if (psHalls && /#\d+\s*$/.test($('#pision-hall').value)) hallToStore(PS.findHall(psHalls, $('#pision-hall').value));
   });
   $('#pision-fetch').addEventListener('click', fetchPision);
   $('#pision-undo').addEventListener('click', undoPision);
