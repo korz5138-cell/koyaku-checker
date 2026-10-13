@@ -119,8 +119,8 @@
       cols.last = x;
       if (!cols.name && t.includes('機種')) cols.name = x;
       else if (!cols.out && t.includes('アウト')) cols.out = x;
-      else if (!cols.safe && t.includes('セーフ')) cols.safe = x;
-      else if (!cols.diff && t.includes('差')) cols.diff = x;
+      else if (!cols.safe && (t.includes('セーフ') || t === 'BO' || t.includes('払出'))) cols.safe = x;
+      else if (!cols.diff && t.includes('差')) { cols.diff = x; cols.diffLabel = t; }
       else if (!cols.games && (t.includes('ゲーム') || t === 'G数' || t.includes('回転'))) cols.games = x;
       else if (!cols.bb && t === 'BB') cols.bb = x;
       else if (!cols.rb && t === 'RB') cols.rb = x;
@@ -137,8 +137,11 @@
       const g = x => (x ? cellValue(ws.getCell(r, x)) : null);
       const name = String(g(cols.name) ?? '').trim();
       if (!name) continue;
-      const out = toNum(g(cols.out)), safe = toNum(g(cols.safe));
+      const out = toNum(g(cols.out));
       const rawDiff = toNum(g(cols.diff));
+      let safe = toNum(g(cols.safe));
+      // セーフの列がなく「差玉」「差数」（ホール目線＝アウト−セーフ）がある場合はセーフを逆算する
+      if (safe == null && out != null && rawDiff != null && /差玉|差数|^差$/.test(cols.diffLabel || '')) safe = out - rawDiff;
       rows.push({
         row: r, no, name,
         out, safe, rawDiff,

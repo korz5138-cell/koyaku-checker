@@ -19,6 +19,46 @@
     return String(v ?? '').normalize('NFKC').trim();
   };
 
+  // テンプレートの集計欄の数式を計算する（保護ビューやプレビューでも値が見えるよう、計算結果も書き込むため）
+  function evalFormula(ws, f) {
+    const num = addr => {
+      const v = ws.getCell(addr).value;
+      const x = v && typeof v === 'object' ? v.result : v;
+      return typeof x === 'number' ? x : null;
+    };
+    const colNums = (col, r1, r2) => {
+      const xs = [];
+      for (let r = r1; r <= r2; r++) { const x = num(col + r); if (x != null) xs.push(x); }
+      return xs;
+    };
+    let m;
+    if ((m = f.match(/^COUNT\(([A-Z]+)(\d+):\1(\d+)\)$/))) return colNums(m[1], +m[2], +m[3]).length;
+    if ((m = f.match(/^AVERAGE\(([A-Z]+)(\d+):\1(\d+)\)$/))) {
+      const xs = colNums(m[1], +m[2], +m[3]);
+      return xs.length ? xs.reduce((s, x) => s + x, 0) / xs.length : undefined;
+    }
+    if ((m = f.match(/^([A-Z]+\d+)-([A-Z]+\d+)$/))) {
+      const a = num(m[1]), b = num(m[2]);
+      return a != null && b != null ? a - b : undefined;
+    }
+    if ((m = f.match(/^ROUNDUP\(([A-Z]+\d+),0\)$/))) {
+      const a = num(m[1]);
+      return a != null ? Math.ceil(Math.round(a * 1e9) / 1e9) : undefined;
+    }
+    if ((m = f.match(/^\(([A-Z]+\d+)\*([\d.]+)\)(?:\/([\d.]+))?$/))) {
+      const a = num(m[1]);
+      return a != null ? (a * +m[2]) / (m[3] ? +m[3] : 1) : undefined;
+    }
+    if ((m = f.match(/^LOOKUP\(([A-Z]+\d+),\{([\d,]+)\},\{(.+)\}\)$/))) {
+      const a = num(m[1]);
+      const keys = m[2].split(',').map(Number), vals = m[3].split(',').map(s => s.replace(/"/g, ''));
+      let i = -1;
+      keys.forEach((k, j) => { if (a != null && a >= k) i = j; });
+      return i >= 0 ? vals[i] : undefined;
+    }
+    return undefined;
+  }
+
   function pickByTag(items, tag) {
     const hit = items.find(x => R.TAGS[tag].col.test(x.label));
     if (hit) return hit;
@@ -73,7 +113,9 @@
       put(col.bb, m.bb);
       put(col.rb, m.rb);
       put(col.games, m.games);
-      if (col.diff) ws.getCell(r, col.diff).value = { formula: `${letter(col.safe)}${r}-${letter(col.out)}${r}` };
+      if (col.diff) {
+        ws.getCell(r, col.diff).value = { formula: `${letter(col.safe)}${r}-${letter(col.out)}${r}`, result: (m.safe || 0) - (m.out || 0) };
+      }
       const supp = S.supp.has(m.i);
       if (m.orig || supp) {
         const cell = ws.getCell(r, pickByTag(cats, tagOf(m)).c);
@@ -98,6 +140,33 @@
         });
       }
     }
+
+    // データのない行の差枚の数式は 0（空欄の引き算）
+    if (col.diff) {
+      for (let rr = lastRow + 1; rr <= TEMPLATE_LAST_ROW; rr++) {
+        const v = ws.getCell(rr, col.diff).value;
+        if (v && typeof v === 'object' && v.formula) ws.getCell(rr, col.diff).value = { formula: v.formula, result: 0 };
+      }
+    }
+    // 集計欄（設置数・平均・全台系必要台数など）の計算結果を入れる。参照し合う数式があるので数回まわす
+    for (let pass = 0; pass < 3; pass++) {
+      for (let rr = 4; rr <= 8; rr++) {
+        for (let c = 1; c <= 20; c++) {
+          const cell = ws.getCell(rr, c);
+          const v = cell.value;
+          if (!v || typeof v !== 'object' || !v.formula) continue;
+          const result = evalFormula(ws, v.formula);
+          if (result !== undefined) cell.value = { formula: v.formula, result };
+        }
+      }
+    }
+    // Excelで開いたときにも計算し直させる
+    wb.calcProperties = Object.assign({}, wb.calcProperties, { fullCalcOnLoad: true });
+
+    // 見出し行にフィルターを付ける（テンプレートの極シートと同じ範囲の形）
+    ws.autoFilter = `A${HEAD_ROW}:${ws.getColumn(ws.columnCount).letter}${Math.max(lastRow, TEMPLATE_LAST_ROW)}`;
+    // テンプレートに残っている極シート用のフィルター範囲の名前は、書き出すとシートとの対応が外れるため消す（Excelが開くときに作り直す）
+    wb.definedNames.model = wb.definedNames.model.filter(x => x.name !== '_xlnm._FilterDatabase');
 
     // 朝一入場・店舗様コメントを引き継ぐ
     for (const [label, v] of Object.entries(p.meta.entry || {})) {
