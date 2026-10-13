@@ -176,6 +176,8 @@ button, input, select { font: inherit; color: inherit; }
 .cgroup__head { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: var(--surface-2); }
 .cgroup__title { flex: 1; font-weight: 600; font-size: 13px; min-width: 0; overflow-wrap: anywhere; }
 .need { font-size: 12px; font-weight: 700; color: var(--ng); white-space: nowrap; }
+.need--done { color: var(--supp); }
+.cgroup.is-pinned { border-color: color-mix(in srgb, var(--supp) 55%, var(--line)); }
 .cgroup__note { padding: 8px 10px; color: var(--muted); font-size: 13px; }
 .cgroup__avg { padding: 4px 10px 6px; background: var(--surface-2); color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; border-top: 1px solid var(--line); }
 .mlist { max-height: 232px; overflow-y: auto; }

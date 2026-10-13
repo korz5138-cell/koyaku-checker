@@ -148,7 +148,7 @@
         const g = x.t.model;
         const um = unmarkedOf(g, o.isMarked);
         return {
-          title: `${x.t.label}（${g.name}・${g.n}台）`, needText: 'あと1台', machines: um, model: g,
+          key: 'm:' + g.key, title: `${x.t.label}（${g.name}・${g.n}台）`, needText: 'あと1台', machines: um, model: g,
           note: um.length ? null : '空いている台がありません（全台が他の公約で使われています）',
         };
       }),
@@ -171,7 +171,7 @@
         ? opts.map(x => ({ s: 'ng', t: `${x.t.label}：${x.c}/${x.g.n}台（${x.need > 0 ? `1/2まであと${x.need}台` : '他の公約で使用中'}）` }))
         : [{ s: 'ng', t: '対象機種が設置されていません' }],
       cands: () => opts.filter(x => x.need > 0).map(x => ({
-        title: `${x.t.label}（${x.g.name}・${x.g.n}台・⑤⑥${x.c}台）`, needText: `あと${x.need}台で1/2`, model: x.g,
+        key: 'm:' + x.g.key, title: `${x.t.label}（${x.g.name}・${x.g.n}台・⑤⑥${x.c}台）`, needText: `あと${x.need}台で1/2`, model: x.g,
         machines: unmarkedOf(x.g, o.isMarked),
       })),
     };
@@ -187,7 +187,7 @@
       .sort((a, b) => a.need - b.need || b.g.n - a.g.n)
       .slice(0, 10)
       .map(x => ({
-        title: `${x.g.name}（${x.g.n}台・⑤⑥${x.c}台）`, needText: `あと${x.need}台で全台${extra ? extra(x.g) : ''}`, model: x.g,
+        key: 'm:' + x.g.key, title: `${x.g.name}（${x.g.n}台・⑤⑥${x.c}台）`, needText: `あと${x.need}台で全台${extra ? extra(x.g) : ''}`, model: x.g,
         machines: unmarkedOf(x.g, o.isMarked), selectAll: true,
       }));
   }
@@ -217,7 +217,7 @@
       if (x.w.some(m => taken.has(m))) continue;
       x.w.forEach(m => taken.add(m));
       out.push({
-        title: `${x.w[0].no}〜${x.w[x.w.length - 1].no}（${shortNames(x.w)}）`,
+        key: `w:${x.w[0].i}:${size}`, title: `${x.w[0].no}〜${x.w[x.w.length - 1].no}（${shortNames(x.w)}）`,
         needText: `あと${x.add.length}台で${size}台並び`, machines: x.w, selectAll: true, avgUnits: x.w,
       });
       if (out.length >= 10) break;
@@ -225,8 +225,14 @@
     return out;
   }
 
-  function finishOthers(ctx, st, isMarked) {
-    for (const m of ctx.machines) if (isMarked(m) && !st.used.has(m)) st.used.set(m, 'other');
+  // どの公約にも数えなかった⑤⑥の台の区分（ホールの付け方に合わせる）
+  // 対象5機種の台は①、極では4台以上の機種の台は②、それ以外は「その他」
+  function finishOthers(ctx, st, isMarked, o, bigTag) {
+    const targets = new Set(o.targets.map(t => t.model).filter(Boolean));
+    for (const m of ctx.machines) {
+      if (!isMarked(m) || st.used.has(m)) continue;
+      st.used.set(m, targets.has(m.model) ? 't6' : bigTag && m.model.n >= 4 ? bigTag : 'other');
+    }
     return st.used;
   }
 
@@ -284,7 +290,7 @@
       const m = g.units.find(free);
       if (m) st.used.set(m, 'k2');
     }
-    finishOthers(ctx, st, isMarked);
+    finishOthers(ctx, st, isMarked, o, 'k2');
 
     const targetSet = new Set(o.targets.map(t => t.model).filter(Boolean));
     const zenExcl = new Set([...zen, half, ...(strict ? targetSet : [])].filter(Boolean));
@@ -301,7 +307,7 @@
           { s: uncovered.length ? 'ng' : 'ok', t: `4台以上設置：${big.length}機種 ／ ⑤⑥なし：${uncovered.length}機種` },
           ...uncovered.map(g => ({ s: 'ng', t: `${g.name}（${g.n}台）` })),
         ],
-        cands: () => uncovered.map(g => ({ title: `${g.name}（${g.n}台）`, needText: 'あと1台', machines: unmarkedOf(g, isMarked), model: g })),
+        cands: () => uncovered.map(g => ({ key: 'm:' + g.key, title: `${g.name}（${g.n}台）`, needText: 'あと1台', machines: unmarkedOf(g, isMarked), model: g })),
       },
       {
         id: 'k3', no: '③', title: '3台以上機種の全台⑤⑥ ×2機種',
@@ -340,7 +346,7 @@
     const ok4 = runs.some(r => r.length >= 3) || runs.length >= 2;
     for (const r of runs) for (const m of r) st.used.set(m, 'm4');
     finishTargets(items, half, st, isMarked);
-    finishOthers(ctx, st, isMarked);
+    finishOthers(ctx, st, isMarked, o);
 
     const flagged = ctx.models.filter(g => g.n >= 3 && o.is1149(g));
     const targetSet = new Set(o.targets.map(t => t.model).filter(Boolean));
@@ -414,7 +420,7 @@
     for (const m of smallMarked) st.used.set(m, 'a4');
     finishTargets(items, half, st, isMarked);
     if (r3) for (const m of r3.units) if (isMarked(m) && !st.used.has(m)) st.used.set(m, 'a3');
-    finishOthers(ctx, st, isMarked);
+    finishOthers(ctx, st, isMarked, o);
 
     const N = ctx.N, R2 = ceilDiv(N * 4, 100);
     const have2 = zen.reduce((s, g) => s + g.n, 0);
@@ -452,7 +458,7 @@
           ? [{ s: 'ok', t: `${r3.name}：${markedCnt(r3, isMarked)}/${r3.n}台（必要${ceilDiv(r3.n, 2)}台）` }]
           : [{ s: 'ng', t: '1/2機種なし' }],
         cands: () => r3opts.slice(0, 10).map(x => ({
-          title: `${x.g.name}（${x.g.n}台・⑤⑥${x.c}台）`, needText: `あと${x.need}台で1/2`, machines: unmarkedOf(x.g, isMarked), model: x.g,
+          key: 'm:' + x.g.key, title: `${x.g.name}（${x.g.n}台・⑤⑥${x.c}台）`, needText: `あと${x.need}台で1/2`, machines: unmarkedOf(x.g, isMarked), model: x.g,
         })),
       },
       {
@@ -463,7 +469,7 @@
           ? [{ s: smallMarked.length >= R4 ? 'ok' : 'ng', t: `2台設置以下 ${small.length}台 → 必要${R4}台 ／ ⑤⑥${smallMarked.length}台` }]
           : [{ s: 'skip', t: '2台設置以下の機種がありません' }],
         cands: () => [{
-          title: '2台設置以下の台', needText: `あと${R4 - smallMarked.length}台`,
+          key: 'small', title: '2台設置以下の台', needText: `あと${R4 - smallMarked.length}台`,
           machines: small.filter(m => !isMarked(m)).sort(byDiffDesc),
         }],
       },
@@ -485,7 +491,7 @@
     const segs = segsOf(runsOf(ctx, free), 4);
     for (const s of segs) for (const m of s) st.used.set(m, 'o2');
     finishTargets(items, half, st, isMarked);
-    finishOthers(ctx, st, isMarked);
+    finishOthers(ctx, st, isMarked, o);
     const N = ctx.N, need = ceilDiv(N, 50); // N×8%÷4 の切り上げ
     const reqs = [
       reqTargets('①', items, o),

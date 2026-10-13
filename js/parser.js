@@ -297,6 +297,18 @@
       }
     }
 
+    // 朝一入場の人数と店舗様コメント（公式テンプレから読み込んだときは出力に引き継ぐ）
+    const meta = { entry: {}, comment: null };
+    for (let r = 1; r <= Math.min(10, ws.rowCount); r++) {
+      for (let c = 1; c <= Math.min(30, ws.columnCount); c++) {
+        const cell = ws.getCell(r, c);
+        if (isSlave(cell)) continue;
+        const t = txt(cell);
+        if (['抽選(予約)', '再整列', '一般'].includes(t)) meta.entry[t] = toNum(cellValue(ws.getCell(r, c + 1)));
+        else if (t.startsWith('※店長カスタム') && !meta.comment) meta.comment = String(cellValue(cell));
+      }
+    }
+
     const typeGuess = guessType([
       format === 'C' ? marksSheet.ws.name : ws.name,
       ...topTexts(format === 'C' ? marksSheet.ws : ws, 5),
@@ -316,6 +328,7 @@
       blocks: marksSheet ? marksSheet.blocks.map(b => ({ c: b.c, cols: b.cols, title: b.title, lastRow: Math.max(marksSheet.r, ...b.rows.map(e => e.row)) })) : null,
       typeGuess,
       machines,
+      meta,
       warnings,
     };
   };

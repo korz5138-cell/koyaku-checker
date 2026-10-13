@@ -27,7 +27,7 @@
   const S = {
     parsed: null, ctx: null, buffer: null,
     type: 'kiwami', typeSource: 'auto', // auto: ファイルから判定 / unknown: 判定できず / manual: 手動で選択
-    targets: [], supp: new Set(), lenient: false,
+    targets: [], supp: new Set(), pins: new Map(), lenient: false,
     result: null, filter: 'marked', search: '',
   };
 
@@ -78,6 +78,7 @@
     S.buffer = buffer;
     S.ctx = R.buildCtx(parsed.machines);
     S.supp = new Set();
+    S.pins = new Map();
     S.type = parsed.typeGuess || 'kiwami';
     S.typeSource = parsed.typeGuess ? 'auto' : 'unknown';
     S.lenient = false;
@@ -167,17 +168,42 @@
       `</label>`;
   }
 
+  // チェックを入れた候補グループは、判定し直しても消えないように固定して表示し続ける
+  function pinGroup(reqId, key) {
+    const id = `${reqId}|${key}`;
+    if (S.pins.has(id)) return;
+    const r = S.result.reqs.find(x => x.id === reqId);
+    const g = r && (r.groups || []).find(x => x.key === key);
+    if (g) S.pins.set(id, { reqId, key, group: { ...g, machines: [...g.machines] } });
+  }
+
+  function groupsFor(r) {
+    const current = r.status === 'ng' ? (r.groups || []) : [];
+    const pins = [...S.pins.values()].filter(p => p.reqId === r.id);
+    const pinned = pins.map(p => {
+      const cur = current.find(g => g.key === p.key);
+      // チェックした台は「未選択の台」から外れるので、固定したときの台と合わせて並べる
+      const machines = [...new Set([...p.group.machines, ...(cur ? cur.machines : [])])];
+      p.group = { ...(cur || p.group), machines };
+      return cur ? { ...cur, machines, pinned: true } : { ...p.group, needText: '補填済み', done: true, pinned: true };
+    });
+    return [...pinned, ...current.filter(g => !pins.some(p => p.key === g.key))];
+  }
+
   function renderReq(r) {
     const lines = r.lines.map(l => `<li class="${l.s}">${esc(l.t)}</li>`).join('');
     let cands = '';
-    if (r.status === 'ng') {
-      const groups = r.groups || [];
-      cands = `<div class="cands"><h4 class="cands__title">補填候補<small>チェックを入れた台が補填されます（差枚の良い順）</small></h4>` +
+    const groups = groupsFor(r);
+    if (r.status === 'ng' || groups.length) {
+      const head = r.status === 'ng'
+        ? '補填候補<small>チェックを入れた台が補填されます（差枚の良い順）</small>'
+        : '補填した台<small>チェックを外すと取り消せます</small>';
+      cands = `<div class="cands"><h4 class="cands__title">${head}</h4>` +
         (groups.length
           ? `<div class="cgroups">${groups.map(g => {
             const selectable = g.machines.filter(m => !m.orig && !S.supp.has(m.i));
-            return `<div class="cgroup"><div class="cgroup__head"><span class="cgroup__title">${esc(g.title)}</span>` +
-              `<span class="need">${esc(g.needText)}</span>` +
+            return `<div class="cgroup${g.pinned ? ' is-pinned' : ''}" data-req="${esc(r.id)}" data-key="${esc(g.key)}"><div class="cgroup__head"><span class="cgroup__title">${esc(g.title)}</span>` +
+              `<span class="need${g.done ? ' need--done' : ''}">${esc(g.needText)}</span>` +
               (g.selectAll && selectable.length ? `<button class="btn btn--sm" data-sel="${selectable.map(m => m.i).join(',')}">まとめて選ぶ</button>` : '') +
               `</div>` +
               (g.model ? avgLine(g.model.units, `機種平均（${g.model.n}台）`) : g.avgUnits ? avgLine(g.avgUnits, `${g.avgUnits.length}台の平均`) : '') +
@@ -241,12 +267,18 @@
   // ---------- 操作 ----------
   function toggleSupp(i, on) {
     if (on) S.supp.add(i); else S.supp.delete(i);
+    // 補填した台が1台も残っていない固定グループは外す
+    for (const [id, p] of S.pins) if (!p.group.machines.some(m => S.supp.has(m.i))) S.pins.delete(id);
     run();
   }
 
   document.addEventListener('change', e => {
     const t = e.target;
-    if (t.matches('input[data-i]')) return toggleSupp(Number(t.dataset.i), t.checked);
+    if (t.matches('input[data-i]')) {
+      const grp = t.closest('.cgroup');
+      if (grp && t.checked) pinGroup(grp.dataset.req, grp.dataset.key);
+      return toggleSupp(Number(t.dataset.i), t.checked);
+    }
     if (t.matches('select[data-target]')) {
       const key = t.value;
       S.targets[Number(t.dataset.target)].model = S.ctx.models.find(g => g.key === key) || null;
@@ -269,12 +301,18 @@
       if (b.dataset.type !== S.type || S.typeSource === 'unknown') {
         S.type = b.dataset.type;
         S.typeSource = 'manual';
+        S.pins.clear();
         run();
         toast(`${R.TYPES[S.type].label}取材の公約で判定し直しました`);
       }
       return;
     }
-    if (b.dataset.sel) { b.dataset.sel.split(',').forEach(i => S.supp.add(Number(i))); return run(); }
+    if (b.dataset.sel) {
+      const grp = b.closest('.cgroup');
+      if (grp) pinGroup(grp.dataset.req, grp.dataset.key);
+      b.dataset.sel.split(',').forEach(i => S.supp.add(Number(i)));
+      return run();
+    }
     if (b.dataset.unsupp) return toggleSupp(Number(b.dataset.unsupp), false);
     if (b.dataset.filter) {
       S.filter = b.dataset.filter;
