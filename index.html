@@ -6,7 +6,7 @@
   <title>公約チェッカー</title>
   <meta name="robots" content="noindex">
   <!-- 更新したら ?v= の番号を変える（古いファイルがブラウザに残るのを防ぐ） -->
-  <link rel="stylesheet" href="css/style.css?v=20261013i">
+  <link rel="stylesheet" href="css/style.css?v=20261013l">
 </head>
 <body>
   <header class="topbar">
@@ -81,6 +81,24 @@
         </div>
       </details>
 
+      <details id="extdata" class="panel pision-panel">
+        <summary>台データオンライン（P-ARK）で補う<span id="ext-badge" class="pision__badge" hidden></span></summary>
+        <div class="panel__body pision">
+          <div class="pision__row">
+            <label class="outname__field pision__hall"><span>店舗</span><input type="search" id="dd-store" list="dd-stores" placeholder="ピーアークを探す（店名で検索）" autocomplete="off"></label>
+            <datalist id="dd-stores"></datalist>
+            <label class="outname__field"><span>日付</span><select id="dd-date"></select></label>
+            <button class="btn btn--primary btn--sm" id="dd-fetch" type="button">取得</button>
+            <button class="btn btn--sm" id="ext-undo" type="button" hidden>元に戻す</button>
+          </div>
+          <div id="ext-result" class="pision__result" hidden></div>
+          <p class="pision__help">台番号で照合し、シートで空欄のBB・RB・G数を埋め、機種名を台データオンラインの名前に置き換えます。選んだ店名は「出力ファイル名」の店舗名に入ります。判定のときの機種のまとめ方は変わりません。
+            データは管理者のパソコンが取得のたびに載せます（取得できた店・日付だけ選べます）。
+            <button class="btn btn--sm btn--ghost" id="ext-pick" type="button">ファイルから読む</button></p>
+          <input type="file" id="ext-file" accept=".csv,.xlsx" hidden>
+        </div>
+      </details>
+
       <section id="supp" class="supp" hidden></section>
 
       <section id="reqs" class="reqs"></section>
@@ -126,12 +144,13 @@
   <div id="toast" class="toast" hidden></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
-  <script src="js/config.js?v=20261013i"></script>
-  <script src="data/payout6.js?v=20261013i"></script>
-  <script src="js/parser.js?v=20261013i"></script>
-  <script src="js/rules.js?v=20261013i"></script>
-  <script src="js/export.js?v=20261013i"></script>
-  <script src="js/pision.js?v=20261013i"></script>
-  <script src="js/app.js?v=20261013i"></script>
+  <script src="js/config.js?v=20261013l"></script>
+  <script src="data/payout6.js?v=20261013l"></script>
+  <script src="js/parser.js?v=20261013l"></script>
+  <script src="js/rules.js?v=20261013l"></script>
+  <script src="js/export.js?v=20261013l"></script>
+  <script src="js/pision.js?v=20261013l"></script>
+  <script src="js/extdata.js?v=20261013l"></script>
+  <script src="js/app.js?v=20261013l"></script>
 </body>
 </html>

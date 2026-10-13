@@ -248,11 +248,137 @@
   }
   function resetPision() {
     S.pision = null;
+    S.ext = null;
     $('#pision-hall').value = '';
     $('#pision-undo').hidden = true;
     $('#pision-badge').hidden = true;
     pisionMessage('');
+    resetExtUI('');
     prefillHall();
+    if (ddIndex) prefillDD();
+  }
+
+  // pision とデータファイルは、どちらか後から反映した方だけを残す（反映の前に元の値へ戻す）
+  function clearFilled() {
+    if (S.pision || S.ext) PS.undo(S.parsed.machines, S.ctx.models);
+    if (S.pision) {
+      S.pision = null;
+      $('#pision-undo').hidden = true;
+      $('#pision-badge').hidden = true;
+      pisionMessage('');
+    }
+    if (S.ext) { S.ext = null; resetExtUI(''); }
+  }
+
+  // ---------- データファイルで補う（台データオンラインなど） ----------
+  const XD = window.KoyakuExtData;
+  function extMessage(text, isError) {
+    const el = $('#ext-result');
+    el.hidden = !text;
+    el.textContent = text || '';
+    el.classList.toggle('is-error', !!isError);
+  }
+  function resetExtUI(text) {
+    $('#ext-undo').hidden = true;
+    $('#ext-badge').hidden = true;
+    extMessage(text);
+  }
+
+  // 台データオンライン：サイトに載っている店・日付から選ぶ
+  let ddIndex = null;
+  const ddLabel = s => `${s.name}（${s.pref || ''}）#${s.id}`;
+  async function ensureDDIndex() {
+    if (!ddIndex) {
+      ddIndex = await XD.index();
+      $('#dd-stores').innerHTML = ddIndex.stores.map(s => `<option value="${esc(ddLabel(s))}"></option>`).join('');
+      if (!ddIndex.stores.length) extMessage('まだデータがありません（管理者のパソコンで台データオンラインを取得すると、ここに出ます）', true);
+    }
+    return ddIndex;
+  }
+  // 検索欄の文字から店を決める（候補を選んだ「…#店番号」の形、店名と同じ、店名に含まれる店が1つだけ、のどれか）
+  function ddStoreOf(text) {
+    if (!ddIndex) return null;
+    const t = String(text || '').normalize('NFKC').trim();
+    const id = (t.match(/#(\d+)\s*$/) || [])[1];
+    if (id) return ddIndex.stores.find(s => s.id === id) || null;
+    if (!t) return null;
+    const exact = ddIndex.stores.find(s => s.name.normalize('NFKC') === t);
+    if (exact) return exact;
+    const hits = ddIndex.stores.filter(s => s.name.normalize('NFKC').includes(t));
+    return hits.length === 1 ? hits[0] : null;
+  }
+  function renderDDDates(preferDate) {
+    const st = ddStoreOf($('#dd-store').value);
+    const dates = st ? st.dates : [];
+    $('#dd-date').innerHTML = dates.length
+      ? dates.map(d => `<option value="${d}">${+d.slice(5, 7)}/${+d.slice(8, 10)}</option>`).join('')
+      : '<option value="">—</option>';
+    if (preferDate && dates.includes(preferDate)) $('#dd-date').value = preferDate;
+  }
+  // 新しいシートを読み込んだら、店の検索欄は空に戻す（出力ファイル名の店舗名からは選ばない）
+  function prefillDD() {
+    $('#dd-store').value = '';
+    renderDDDates();
+  }
+  async function fetchDD() {
+    const st = ddStoreOf($('#dd-store').value);
+    const date = $('#dd-date').value;
+    if (!st) return extMessage('店を検索して、候補から選んでください', true);
+    if (!date) return extMessage('日付を選んでください', true);
+    const id = st.id;
+    const btn = $('#dd-fetch');
+    btn.disabled = true;
+    extMessage('読み込んでいます…');
+    try {
+      applyExt(await XD.load(id, date), null);
+    } catch (e) {
+      extMessage(e.message || String(e), true);
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  async function importExtFile(file) {
+    if (!file) return;
+    extMessage(`${file.name} を読んでいます…`);
+    try {
+      applyExt(await XD.read(file), file.name);
+    } catch (e) {
+      extMessage(e.message || String(e), true);
+    }
+  }
+
+  function applyExt({ details, meta }, fileName) {
+    clearFilled();
+    const st = PS.apply(S.parsed.machines, S.ctx.models, details);
+    S.ext = { file: fileName, meta, st };
+    if (meta.store) { $('#out-store').value = meta.store; renderOutName(); }
+    payCache.clear();
+    renderSettings();
+    run();
+    const label = [meta.store, meta.date ? `${+meta.date.slice(5, 7)}/${+meta.date.slice(8, 10)}` : null, meta.source].filter(Boolean).join('・') || fileName;
+    const parts = [
+      `${label} のデータと照合しました（${st.matched}/${st.total}台が一致）。`,
+      `BB ${st.bb}台・RB ${st.rb}台・G数 ${st.games}台を補い、機種名を${st.renamed}機種置き換えました。`,
+    ];
+    if (st.missing.length) parts.push(`データに無かった台番号：${st.missing.slice(0, 12).join('、')}${st.missing.length > 12 ? ` ほか${st.missing.length - 12}台` : ''}`);
+    const outDate = $('#out-date').value;
+    const warnDate = meta.date && outDate && meta.date !== outDate;
+    if (warnDate) parts.push(`※データの日付（${+meta.date.slice(5, 7)}/${+meta.date.slice(8, 10)}）が「出力ファイル名」の日付と違います。`);
+    if (st.matched < st.total * 0.5) parts.push('※一致した台が少ないので、店と日付が合っているか確認してください。');
+    extMessage(parts.join(' '), warnDate || st.matched < st.total * 0.5);
+    $('#ext-undo').hidden = false;
+    $('#ext-badge').hidden = false;
+    $('#ext-badge').textContent = '反映済み';
+  }
+
+  function undoExt() {
+    PS.undo(S.parsed.machines, S.ctx.models);
+    S.ext = null;
+    payCache.clear();
+    renderSettings();
+    run();
+    resetExtUI('データファイルで補った値と機種名を元に戻しました。');
   }
 
   async function fetchPision() {
@@ -269,7 +395,7 @@
       const date = $('#out-date').value;
       if (!date) throw new Error('「出力ファイル名」の日付を入れてください');
       const details = await PS.results(hall.id, date);
-      if (S.pision) PS.undo(S.parsed.machines, S.ctx.models); // 取り直すときは元の値から
+      clearFilled(); // 取り直すとき・データファイルで補っていたときは元の値から
       const st = PS.apply(S.parsed.machines, S.ctx.models, details);
       S.pision = { hall, date, st };
       payCache.clear();
@@ -559,6 +685,20 @@
     if (psHalls && /#\d+\s*$/.test($('#pision-hall').value)) hallToStore(PS.findHall(psHalls, $('#pision-hall').value));
   });
   $('#pision-fetch').addEventListener('click', fetchPision);
+  $('#extdata').addEventListener('toggle', async () => {
+    if (!$('#extdata').open) return;
+    try { await ensureDDIndex(); } catch (e) { extMessage(e.message, true); }
+  });
+  // 候補から店を選んだら、日付の一覧を出し、店名を出力ファイル名の店舗名に入れる
+  $('#dd-store').addEventListener('input', () => {
+    const st = ddStoreOf($('#dd-store').value);
+    renderDDDates($('#out-date').value);
+    if (st && /#\d+\s*$/.test($('#dd-store').value)) { $('#out-store').value = st.name; renderOutName(); }
+  });
+  $('#dd-fetch').addEventListener('click', fetchDD);
+  $('#ext-pick').addEventListener('click', () => $('#ext-file').click());
+  $('#ext-file').addEventListener('change', () => { importExtFile($('#ext-file').files[0]); $('#ext-file').value = ''; });
+  $('#ext-undo').addEventListener('click', undoExt);
   $('#pision-undo').addEventListener('click', undoPision);
 
   // ---------- ファイル ----------
