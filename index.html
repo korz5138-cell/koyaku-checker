@@ -6,7 +6,7 @@
   <title>公約チェッカー</title>
   <meta name="robots" content="noindex">
   <!-- 更新したら ?v= の番号を変える（古いファイルがブラウザに残るのを防ぐ） -->
-  <link rel="stylesheet" href="css/style.css?v=20261013o">
+  <link rel="stylesheet" href="css/style.css?v=20261016a">
 </head>
 <body>
   <header class="topbar">
@@ -58,6 +58,24 @@
         <label class="outname__field"><span>日付</span><input type="date" id="out-date"></label>
         <label class="outname__field"><span>店舗名</span><input type="text" id="out-store" placeholder="任意（例：PIA大森）"></label>
         <span class="outname__preview" id="out-preview"></span>
+      </section>
+
+      <section class="rating" aria-label="取材の評価">
+        <div class="rating__head">
+          <span class="outname__label">取材の評価</span>
+          <span class="rating__stars" id="rating-stars"></span>
+          <div class="seg" role="radiogroup" aria-label="交換率">
+            <button type="button" data-exch="normal" class="is-on">非等価</button>
+            <button type="button" data-exch="equiv">等価</button>
+          </div>
+        </div>
+        <div class="rating__stats" id="rating-stats"></div>
+        <div class="rating__note" id="rating-note"></div>
+        <div class="rating__share">
+          <label class="outname__field"><span>抽選人数</span><input type="number" id="lottery" min="0" inputmode="numeric" placeholder="例：44"></label>
+          <button type="button" class="btn btn--sm" id="btn-share">共有用にコピー</button>
+        </div>
+        <pre class="rating__preview" id="share-preview"></pre>
       </section>
 
       <details id="pision" class="panel pision-panel">
@@ -144,13 +162,14 @@
   <div id="toast" class="toast" hidden></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
-  <script src="js/config.js?v=20261013o"></script>
-  <script src="data/payout6.js?v=20261013o"></script>
-  <script src="js/parser.js?v=20261013o"></script>
-  <script src="js/rules.js?v=20261013o"></script>
-  <script src="js/export.js?v=20261013o"></script>
-  <script src="js/pision.js?v=20261013o"></script>
-  <script src="js/extdata.js?v=20261013o"></script>
-  <script src="js/app.js?v=20261013o"></script>
+  <script src="js/config.js?v=20261016a"></script>
+  <script src="data/payout6.js?v=20261016a"></script>
+  <script src="js/parser.js?v=20261016a"></script>
+  <script src="js/rules.js?v=20261016a"></script>
+  <script src="js/export.js?v=20261016a"></script>
+  <script src="js/pision.js?v=20261016a"></script>
+  <script src="js/extdata.js?v=20261016a"></script>
+  <script src="js/rating.js?v=20261016b"></script>
+  <script src="js/app.js?v=20261016a"></script>
 </body>
 </html>

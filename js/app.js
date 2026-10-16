@@ -31,7 +31,7 @@
   const S = {
     parsed: null, ctx: null, buffer: null,
     type: 'kiwami', typeSource: 'auto', // auto: ファイルから判定 / unknown: 判定できず / manual: 手動で選択
-    targets: [], supp: new Set(), pins: new Map(), lenient: false,
+    targets: [], supp: new Set(), pins: new Map(), lenient: false, equiv: false, rating: null,
     result: null, filter: 'marked', search: '',
   };
 
@@ -139,6 +139,8 @@
     resolveTargets();
     $('#out-date').value = guessDate(parsed);
     $('#out-store').value = guessStore(parsed);
+    $('#lottery').value = guessLottery(parsed);
+    loadExch();
     resetPision();
     $('#drop').hidden = true;
     $('#app').hidden = false;
@@ -206,6 +208,54 @@
     $('#out-preview').textContent = outBaseName() + '.xlsx';
     const d = $('#out-date').value;
     $('#pision-date').textContent = d ? `${+d.slice(5, 7)}/${+d.slice(8, 10)}` : '未入力';
+    if (S.parsed && S.result) renderRating();
+  }
+
+  // ---------- 取材の評価 ----------
+  const RT = window.KoyakuRating;
+  // 等価／非等価は店ごとに覚える
+  const exchMap = () => store.get('koyaku.exch', {});
+  const storeKey = () => $('#out-store').value.trim().normalize('NFKC');
+  function loadExch() {
+    const v = exchMap()[storeKey()];
+    S.equiv = v === 'equiv';
+  }
+  function saveExch() {
+    const k = storeKey();
+    if (!k) return;
+    const m = exchMap();
+    m[k] = S.equiv ? 'equiv' : 'normal';
+    store.set('koyaku.exch', m);
+  }
+  // 抽選人数の初期値：公式テンプレの「抽選(予約)」、まとめの「抽選人数」、ホール出力の「抽選：28/入場：49」
+  function guessLottery(p) {
+    const e = p.meta.entry && p.meta.entry['抽選(予約)'];
+    if (e != null) return e;
+    const m = (p.meta.topText || '').normalize('NFKC').match(/抽選:\s*(\d+)/);
+    return m ? +m[1] : '';
+  }
+  function shareText() {
+    return RT.shareText({ date: $('#out-date').value, store: $('#out-store').value.trim(), lottery: $('#lottery').value.trim(), r: S.rating });
+  }
+  function renderRating() {
+    const isTarget = m => m.orig || S.supp.has(m.i);
+    const r = RT.rate(S.parsed.machines, isTarget, S.type, S.equiv);
+    S.rating = r;
+    const [hi, lo] = r.thresholds;
+    $('#rating-stars').innerHTML = (r.stars ? '★'.repeat(r.stars) + `<span class="off">${'★'.repeat(3 - r.stars)}</span>` : '－') +
+      `<small>${S.equiv ? '等価' : '非等価'}（☆3 ${hi}%以上・☆1 ${lo}%以下）</small>`;
+    $('#rating-stats').innerHTML = [
+      `対象出率 <b>${r.rate != null ? r.rate.toFixed(1) + '%' : '－'}</b>（${r.nTargetData}台）`,
+      `対象1台平均 <b>${r.targetAvgDiff != null ? RT.signed(r.targetAvgDiff) + '枚' : '－'}</b>`,
+      `全体差枚 <b>${RT.signed(r.totalDiff)}枚</b>`,
+      `全体平均 <b>${r.avgDiff != null ? RT.signed(r.avgDiff) + '枚' : '－'}</b>`,
+    ].map(s => `<span>${s}</span>`).join('');
+    const notes = [];
+    if (r.capped) notes.push('極は全体差枚がプラスでないため、出率は☆3の基準ですが☆2にしています');
+    if (r.nTargetData < r.nTarget) notes.push(`アウト・セーフが無い台（${r.nTarget - r.nTargetData}台）は出率の計算に入れていません`);
+    $('#rating-note').textContent = notes.join('。');
+    $('#share-preview').textContent = shareText();
+    document.querySelectorAll('[data-exch]').forEach(b => b.classList.toggle('is-on', (b.dataset.exch === 'equiv') === S.equiv));
   }
 
   // ---------- pision連携 ----------
@@ -648,6 +698,11 @@
       }
       return;
     }
+    if (b.dataset.exch) {
+      S.equiv = b.dataset.exch === 'equiv';
+      saveExch();
+      return renderRating();
+    }
     if (b.dataset.sel) {
       const grp = b.closest('.cgroup');
       if (grp) pinGroup(grp.dataset.req, grp.dataset.key);
@@ -664,6 +719,11 @@
   $('#tbl-search').addEventListener('input', e => { S.search = e.target.value; renderTable(); });
   $('#out-date').addEventListener('input', renderOutName);
   $('#out-store').addEventListener('input', renderOutName);
+  $('#lottery').addEventListener('input', () => { if (S.rating) $('#share-preview').textContent = shareText(); });
+  $('#btn-share').addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(shareText()); toast('共有用の文をコピーしました'); }
+    catch (e) { toast('コピーできませんでした'); }
+  });
 
   renderPisionKey();
   fillHallList();
