@@ -208,6 +208,7 @@
     for (const t of texts) {
       if (!t) continue;
       const s = String(t).normalize('NFKC');
+      if (/ハーフ|half\s*strong/i.test(s)) return 'half';
       if (/極|虹/.test(s)) return 'kiwami';
       if (/紫/.test(s)) return 'murasaki';
       if (/赤/.test(s)) return 'aka';
@@ -450,6 +451,36 @@
       warnings,
     };
   };
+
+  // pision の台データ（unitId・model.name・diff・games・bb・rb）から、シートを読んだときと同じ形を作る。
+  // アウト・セーフは無い（差枚とG数だけ）。仕掛け台の印は後から台番号のテキストやファイルで付ける
+  P.fromDetails = function (details, { store, date }) {
+    const machines = [];
+    const seen = new Set();
+    for (const d of [...details].sort((a, b) => Number(a.unitId) - Number(b.unitId))) {
+      const no = Number(d.unitId);
+      if (!Number.isInteger(no) || seen.has(no)) continue;
+      seen.add(no);
+      const name = String((d.model && d.model.name) || d.displayName || '').trim();
+      machines.push({
+        i: machines.length, row: null, no, name, key: P.normKey(name),
+        out: null, safe: null, rawDiff: d.diff ?? null, diff: d.diff ?? null,
+        games: d.games ?? null, bb: d.bb ?? null, rb: d.rb ?? null, setting: null,
+        orig: false, declared: null,
+      });
+    }
+    if (!machines.length) throw new Error('pisionに台のデータがありませんでした');
+    return {
+      fileName: `${date}_${store}`, format: 'P', formatLabel: 'pisionの台データ',
+      dataSheet: store, marksSheet: null, hdrRow: null, cols: {}, catCols: [], annC: null, blocks: null,
+      typeGuess: null, machines, settingColors: false,
+      meta: { entry: {}, comment: null, store, topText: '', date }, warnings: [],
+    };
+  };
+
+  P.cellValue = cellValue;
+  P.fillKey = fillKey;
+  P.toInt = toInt;
 
   window.KoyakuParser = P;
 })();

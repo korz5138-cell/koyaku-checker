@@ -1,3 +1,6 @@
+/* display を指定した要素でも hidden で必ず隠れるように */
+[hidden] { display: none !important; }
+
 :root {
   --bg: #f5f6f8;
   --surface: #ffffff;
@@ -151,6 +154,26 @@ button, input, select { font: inherit; color: inherit; }
 .outname__field input[type="text"] { width: 14em; }
 .outname__preview { font-weight: 700; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .outname__preview::before { content: "→ "; color: var(--muted); font-weight: 400; }
+
+/* pisionから始める */
+.pstart {
+  margin-top: 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
+  padding: 16px 18px; display: grid; gap: 10px;
+}
+.pstart__title { margin: 0; font-size: 15px; }
+.pstart__sub { margin: 0; color: var(--muted); font-size: 13px; }
+
+/* 対象の台番号で色を付ける */
+.targets {
+  background: var(--surface); border: 2px solid color-mix(in srgb, var(--accent) 45%, var(--line)); border-radius: var(--radius);
+  padding: 12px 14px; margin: 16px 0; display: grid; gap: 8px; box-shadow: var(--shadow);
+}
+.targets__head { display: flex; align-items: center; gap: 8px; }
+.targets textarea {
+  width: 100%; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); padding: 8px 10px;
+  font: inherit; font-size: 13px; resize: vertical;
+}
+.type--half::before { background: linear-gradient(90deg, var(--ao) 50%, var(--line) 50%); }
 
 /* 取材の評価 */
 .rating {

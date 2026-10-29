@@ -13,6 +13,7 @@
     murasaki: { label: '紫' },
     aka: { label: '赤' },
     ao: { label: '青' },
+    half: { label: 'ハーフストロング' },
   };
 
   // 区分（どの公約に数えたか）と、書式Aで⭕️を付ける列の見出しキーワード
@@ -28,6 +29,7 @@
     m2: { short: '②114.9%全⑥', col: /114/ },
     m4: { short: '④2台以下並び', col: /2台設置以下|2台以下/ },
     o2: { short: '②並び', col: /並び/ },
+    h1: { short: '1/2機種', col: /1\/2/ },
     other: { short: 'その他', col: /その他|単品|他公約/ },
   };
 
@@ -516,8 +518,42 @@
     return { reqs, assign: st.used, cost: suppCost(o, [half]) };
   }
 
+  // ---------- ハーフストロング ----------
+  // ○台以上設置の機種から、1/2（切り上げ）以上が⑤⑥の機種を○機種
+  function solveHalf(ctx, o) {
+    const { isMarked } = o;
+    const cfg = (window.KOYAKU_CONFIG && window.KOYAKU_CONFIG.halfStrong) || { models: 10, minUnits: 2 };
+    const st = { used: new Map() };
+    const pool = ctx.models.filter(g => g.n >= cfg.minUnits);
+    const ok = pool.filter(g => markedCnt(g, isMarked) >= ceilDiv(g.n, 2)).sort((a, b) => b.n - a.n);
+    for (const g of ok) for (const m of g.units) if (isMarked(m)) st.used.set(m, 'h1');
+    finishOthers(ctx, st, isMarked, { targets: [] }); // ①の対象5機種の決まりは無いので、残りは「その他」
+    const short = pool.filter(g => !ok.includes(g))
+      .map(g => { const c = markedCnt(g, isMarked); return { g, c, need: ceilDiv(g.n, 2) - c }; })
+      .sort((a, b) => a.need - b.need || b.c - a.c || b.g.n - a.g.n);
+    const lack = Math.max(0, cfg.models - ok.length);
+    const partial = short.filter(x => x.c > 0);
+    const reqs = [{
+      id: 'h1', no: '①', title: `${cfg.minUnits}台以上設置の機種から、1/2で⑤⑥の機種 ×${cfg.models}`,
+      status: lack ? 'ng' : 'ok', need: lack,
+      lines: [
+        { s: lack ? 'ng' : 'ok', t: `1/2で⑤⑥の機種 ${ok.length}機種 ／ 必要${cfg.models}機種` },
+        ...ok.map(g => ({ s: 'ok', t: `${g.name}：${markedCnt(g, isMarked)}/${g.n}台` })),
+        ...partial.map(x => ({ s: 'ng', t: `${x.g.name}：${x.c}/${x.g.n}台（1/2まであと${x.need}台）` })),
+      ],
+      cands: () => short.slice(0, 12).map(x => ({
+        key: 'm:' + x.g.key, title: `${x.g.name}（${x.g.n}台・⑤⑥${x.c}台）`, needText: `あと${x.need}台で1/2`,
+        machines: unmarkedOf(x.g, isMarked), model: x.g, selectAll: true,
+      })),
+    }];
+    // 単品（1台設置）の⑤⑥は数えないことを知らせる
+    const singles = ctx.machines.filter(m => isMarked(m) && m.model.n < cfg.minUnits);
+    if (singles.length) reqs[0].warn = `${cfg.minUnits}台未満の機種の⑤⑥（${singles.length}台）は数えていません：${singles.slice(0, 6).map(m => m.no).join('、')}${singles.length > 6 ? ' ほか' : ''}`;
+    return pickBest([{ reqs, assign: st.used, cost: 0 }]);
+  }
+
   R.solve = function (ctx, o) {
-    const fn = { kiwami: solveKiwami, murasaki: solveMurasaki, aka: solveAka, ao: solveAo }[o.type];
+    const fn = { kiwami: solveKiwami, murasaki: solveMurasaki, aka: solveAka, ao: solveAo, half: solveHalf }[o.type];
     return fn(ctx, { isSupp: () => false, ...o });
   };
 

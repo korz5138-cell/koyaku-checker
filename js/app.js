@@ -4,6 +4,7 @@
   const $ = s => document.querySelector(s);
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const fmtNum = n => (n == null ? '' : Math.round(n).toLocaleString('ja-JP'));
+  const fmtMD = d => (/^\d{4}-\d{2}-\d{2}$/.test(d || '') ? `${+d.slice(5, 7)}/${+d.slice(8, 10)}` : d || '');
   const fmtDiff = n => (n == null ? '' : `<span class="${n >= 0 ? 'plus' : 'minus'}">${n > 0 ? '+' : ''}${fmtNum(n)}</span>`);
   const STATUS = { ok: '達成', ng: '未達', skip: '対象外' };
 
@@ -117,32 +118,57 @@
     return wb;
   }
 
-  async function loadBuffer(buffer, fileName) {
+  async function readWorkbook(buffer) {
     const head = new Uint8Array(buffer, 0, 2);
     const isZip = head[0] === 0x50 && head[1] === 0x4B; // .xlsx は "PK" で始まる
-    let wb;
-    if (isZip) {
-      wb = new ExcelJS.Workbook();
-      await wb.xlsx.load(buffer.slice(0));
-    } else {
-      wb = await xlsToWorkbook(buffer);
-    }
-    const parsed = P.parseWorkbook(wb, fileName);
+    if (!isZip) return xlsToWorkbook(buffer);
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buffer.slice(0));
+    return wb;
+  }
+
+  async function loadBuffer(buffer, fileName) {
+    const parsed = P.parseWorkbook(await readWorkbook(buffer), fileName);
+    S.mode = 'file';
+    return start(parsed, buffer);
+  }
+
+  // pision の台データから始める（Excel なし）。仕掛け台は「対象の台番号で色を付ける」で付ける
+  function loadDetails(details, hall, date) {
+    const parsed = P.fromDetails(details, { store: hall.name, date });
+    S.mode = 'pision';
+    return start(parsed, null, hall);
+  }
+
+  function start(parsed, buffer, hall) {
     S.parsed = parsed;
     S.buffer = buffer;
     S.ctx = R.buildCtx(parsed.machines);
     S.supp = new Set();
     S.pins = new Map();
-    S.type = parsed.typeGuess || 'kiwami';
-    S.typeSource = parsed.typeGuess ? 'auto' : 'unknown';
+    if (S.mode === 'pision') {
+      // pision から始めたときは、前回選んだ種類（初めてはハーフストロング）
+      S.type = store.get('koyaku.pisionType', 'half');
+      S.typeSource = 'manual';
+    } else {
+      S.type = parsed.typeGuess || 'kiwami';
+      S.typeSource = parsed.typeGuess ? 'auto' : 'unknown';
+    }
     S.lenient = false;
     resolveTargets();
-    $('#out-date').value = guessDate(parsed);
+    $('#out-date').value = parsed.meta.date || guessDate(parsed);
     $('#out-store').value = guessStore(parsed);
     $('#lottery').value = guessLottery(parsed);
     loadExch();
     resetPision();
+    // pision から始めたときは、台番号の入力を出し、pision・台データオンラインで補う欄は隠す（もう pision のデータなので）
+    const pmode = S.mode === 'pision';
+    $('#targets').hidden = !pmode;
+    $('#pision').hidden = pmode;
+    $('#extdata').hidden = pmode;
+    if (pmode) { $('#tg-text').value = ''; tgMessage(''); $('#tg-count').textContent = ''; }
     $('#drop').hidden = true;
+    $('#pstart').hidden = true;
     $('#app').hidden = false;
     $('#btn-reset').hidden = false;
     renderSettings();
@@ -252,7 +278,8 @@
     ].map(s => `<span>${s}</span>`).join('');
     const notes = [];
     if (r.capped) notes.push('極は全体差枚がプラスでないため、出率は☆3の基準ですが☆2にしています');
-    if (r.nTargetData < r.nTarget) notes.push(`アウト・セーフが無い台（${r.nTarget - r.nTargetData}台）は出率の計算に入れていません`);
+    if (r.nTargetData < r.nTarget) notes.push(`データが無い台（${r.nTarget - r.nTargetData}台）は出率の計算に入れていません`);
+    if (r.estimated) notes.push('アウト・セーフが無いので、出率は G数×3 をアウトとして推定しています');
     $('#rating-note').textContent = notes.join('。');
     $('#share-preview').textContent = shareText();
     document.querySelectorAll('[data-exch]').forEach(b => b.classList.toggle('is-on', (b.dataset.exch === 'equiv') === S.equiv));
@@ -498,10 +525,11 @@
   function render() {
     const p = S.parsed, res = S.result;
     const origCnt = p.machines.filter(m => m.orig).length;
-    $('#info-name').textContent = p.fileName;
+    const pm = p.format === 'P';
+    $('#info-name').textContent = pm ? `${p.meta.store}（${fmtMD(p.meta.date)}・pision）` : p.fileName;
     $('#info-meta').innerHTML = [
-      `書式 <b>${esc(p.formatLabel)}</b>`,
-      `シート <b>${esc(p.dataSheet)}</b>`,
+      pm ? `データ <b>pision</b>` : `書式 <b>${esc(p.formatLabel)}</b>`,
+      pm ? `日付 <b>${esc(p.meta.date)}</b>` : `シート <b>${esc(p.dataSheet)}</b>`,
       `設置 <b>${S.ctx.N}台</b>（${S.ctx.models.length}機種）`,
       p.settingColors
         ? `⑥ <b>${p.machines.filter(m => m.orig && m.setting === 6).length}台</b>・⑤ <b>${p.machines.filter(m => m.orig && m.setting === 5).length}台</b>（赤＝⑥・黄＝⑤）${S.supp.size ? `＋補填 <b>${S.supp.size}台</b>` : ''}`
@@ -518,7 +546,11 @@
 
     const warns = [];
     if (S.typeSource === 'unknown') warns.push('取材の種類をファイルから判定できませんでした。「取材の種類」で正しい種類を選んでください。');
-    if (!origCnt) warns.push('仕掛け台（⭕️や色塗り）が見つかりませんでした。シートの書式を確認してください。');
+    if (!origCnt) {
+      warns.push(S.mode === 'pision'
+        ? '対象の台番号を「対象の台番号で色を付ける」に貼り付けて「色を付ける」を押すか、ファイルを読み込んでください。'
+        : '仕掛け台（⭕️や色塗り）が見つかりませんでした。シートの書式を確認してください。');
+    }
     for (const w of p.warnings.slice(0, 5)) warns.push(w);
     if (p.warnings.length > 5) warns.push(`ほか ${p.warnings.length - 5} 件の注意があります`);
     $('#warnings').innerHTML = warns.map(w => `<div class="notice">${esc(w)}</div>`).join('');
@@ -692,6 +724,7 @@
       if (b.dataset.type !== S.type || S.typeSource === 'unknown') {
         S.type = b.dataset.type;
         S.typeSource = 'manual';
+        if (S.mode === 'pision') store.set('koyaku.pisionType', S.type);
         S.pins.clear();
         run();
         toast(`${R.TYPES[S.type].label}取材の公約で判定し直しました`);
@@ -782,8 +815,136 @@
   input.addEventListener('change', () => { handleFile(input.files[0]); input.value = ''; });
   ['dragenter', 'dragover'].forEach(ev => document.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('is-over'); }));
   ['dragleave', 'drop'].forEach(ev => document.addEventListener(ev, e => { e.preventDefault(); if (ev === 'drop' || e.target === drop) drop.classList.remove('is-over'); }));
-  document.addEventListener('drop', e => handleFile(e.dataTransfer.files[0]));
-  $('#btn-reset').addEventListener('click', () => input.click());
+  // pision から始めた画面では、落としたファイルは「対象の台番号」として読む
+  document.addEventListener('drop', e => {
+    const f = e.dataTransfer.files[0];
+    if (S.mode === 'pision' && !$('#app').hidden) return applyTargetFile(f);
+    handleFile(f);
+  });
+  // 最初の画面（Excel を落とす／pision から始める）に戻る
+  $('#btn-reset').addEventListener('click', () => {
+    $('#app').hidden = true;
+    $('#drop').hidden = false;
+    $('#pstart').hidden = false;
+    $('#btn-reset').hidden = true;
+    $('#drop-error').hidden = true;
+    S.mode = null;
+    renderPstartKey();
+    window.scrollTo(0, 0);
+  });
+
+  // ---------- pision から始める ----------
+  const TG = window.KoyakuTargets;
+  function pstartMessage(text, isError) {
+    const el = $('#pstart-msg');
+    el.hidden = !text;
+    el.textContent = text || '';
+    el.classList.toggle('is-error', !!isError);
+  }
+  function renderPstartKey() { $('#pstart-keyrow').hidden = !!PS.getKey(); }
+  (() => {
+    const d = new Date(Date.now() - 864e5); // 初期値は前日（pision のデータは翌日の深夜にできる）
+    $('#pstart-date').value = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+    renderPstartKey();
+  })();
+  $('#pstart-key-save').addEventListener('click', async () => {
+    const v = $('#pstart-key').value.trim();
+    if (!v) return pstartMessage('APIキーを入力してから「保存」を押してください', true);
+    PS.setKey(v);
+    $('#pstart-key').value = '';
+    renderPstartKey();
+    renderPisionKey();
+    try { await ensureHalls(); pstartMessage(''); } catch (e) { pstartMessage(e.message, true); }
+  });
+  $('#pstart-hall').addEventListener('focus', async () => {
+    if (!PS.getKey()) return;
+    try { await ensureHalls(); } catch (e) { pstartMessage(e.message, true); }
+  });
+  $('#pstart-go').addEventListener('click', async () => {
+    const btn = $('#pstart-go');
+    btn.disabled = true;
+    pstartMessage('pisionから全台のデータを読み込んでいます…');
+    try {
+      const halls = await ensureHalls();
+      const text = $('#pstart-hall').value;
+      const hall = PS.findHall(halls, text) || PS.guessHall(halls, text);
+      if (!hall) throw new Error('店舗を検索して、候補から選んでください');
+      const date = $('#pstart-date').value;
+      if (!date) throw new Error('日付を選んでください');
+      const details = await PS.results(hall.id, date);
+      pstartMessage('');
+      loadDetails(details, hall, date);
+      $('#tg-text').focus();
+    } catch (e) {
+      pstartMessage(e.message || String(e), true);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  // ---------- 対象の台番号で色を付ける ----------
+  function tgMessage(text, isError) {
+    const el = $('#tg-result');
+    el.hidden = !text;
+    el.textContent = text || '';
+    el.classList.toggle('is-error', !!isError);
+  }
+  function renderTgCount() {
+    const n = S.parsed ? S.parsed.machines.filter(m => m.orig).length : 0;
+    $('#tg-count').textContent = n ? `色付き ${n}台` : '';
+  }
+  // 台番号に色を付ける（前に付けた色に足していく）
+  function markNumbers(numbers, how) {
+    const byNo = new Map(S.parsed.machines.map(m => [m.no, m]));
+    const hit = [], miss = [];
+    for (const n of numbers) {
+      const m = byNo.get(n);
+      if (m) { if (!m.orig) hit.push(m); m.orig = true; } else miss.push(n);
+    }
+    run();
+    renderTgCount();
+    const parts = [`${how}：${numbers.length}台分の台番号を読み、${hit.length}台に色を付けました。`];
+    if (numbers.length - hit.length - miss.length > 0) parts.push(`（${numbers.length - hit.length - miss.length}台はもう色が付いていました）`);
+    if (miss.length) parts.push(`この店のデータに無い台番号：${miss.slice(0, 15).join('、')}${miss.length > 15 ? ` ほか${miss.length - 15}台` : ''}`);
+    tgMessage(parts.join(' '), miss.length > 0);
+  }
+  $('#tg-apply').addEventListener('click', () => {
+    const numbers = TG.parseText($('#tg-text').value);
+    if (!numbers.length) return tgMessage('台番号が見つかりませんでした。「GOD：789-792/810」のように、機種名の後ろに「：」と台番号を書いてください', true);
+    markNumbers(numbers, 'テキスト');
+  });
+  async function applyTargetFile(file) {
+    if (!file || !S.parsed) return;
+    tgMessage(`${file.name} を読んでいます…`);
+    try {
+      let numbers, how;
+      if (/\.(txt|csv)$/i.test(file.name)) {
+        const buf = await file.arrayBuffer();
+        let text = new TextDecoder('utf-8').decode(buf);
+        if (text.includes('�')) text = new TextDecoder('shift_jis').decode(buf);
+        numbers = TG.parseText(text);
+        how = file.name;
+      } else {
+        const r = TG.fromWorkbook(await readWorkbook(await file.arrayBuffer()), file.name);
+        numbers = r.numbers;
+        how = `${file.name}（${r.how}）`;
+      }
+      if (!numbers.length) return tgMessage(`${file.name} から台番号が見つかりませんでした`, true);
+      markNumbers(numbers, how);
+    } catch (e) {
+      tgMessage(`読み込めませんでした：${e.message || e}`, true);
+    }
+  }
+  $('#tg-file-btn').addEventListener('click', () => $('#tg-file').click());
+  $('#tg-file').addEventListener('change', () => { applyTargetFile($('#tg-file').files[0]); $('#tg-file').value = ''; });
+  $('#tg-clear').addEventListener('click', () => {
+    S.parsed.machines.forEach(m => { m.orig = false; });
+    S.supp = new Set();
+    S.pins = new Map();
+    run();
+    renderTgCount();
+    tgMessage('色をすべて消しました。');
+  });
 
   // ---------- 出力 ----------
   function toast(msg) {
@@ -819,7 +980,14 @@
     const btn = $('#btn-download');
     btn.disabled = true;
     try {
-      const blob = await X.build(S);
+      let blob;
+      if (S.type === 'half') {
+        const d = $('#out-date').value;
+        const title = [d ? `${+d.slice(5, 7)}/${+d.slice(8, 10)}` : '', $('#out-store').value.trim(), 'ハーフストロング'].filter(Boolean).join(' ');
+        blob = await X.buildHalf(S, title);
+      } else {
+        blob = await X.build(S);
+      }
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
       a.download = outBaseName() + '.xlsx';
@@ -835,5 +1003,5 @@
   });
 
   // 動作確認用
-  window.KoyakuApp = { loadBuffer, state: S, summaryText, payMatch };
+  window.KoyakuApp = { loadBuffer, loadDetails, applyTargetFile, state: S, summaryText, payMatch };
 })();

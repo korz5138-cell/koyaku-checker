@@ -116,7 +116,10 @@
       put(col.rb, m.rb);
       put(col.games, m.games);
       if (col.diff) {
-        ws.getCell(r, col.diff).value = { formula: `${letter(col.safe)}${r}-${letter(col.out)}${r}`, result: (m.safe || 0) - (m.out || 0) };
+        // アウト・セーフが無い（pision の台データ）ときは差枚をそのまま入れる
+        ws.getCell(r, col.diff).value = m.out == null && m.safe == null && m.diff != null
+          ? m.diff
+          : { formula: `${letter(col.safe)}${r}-${letter(col.out)}${r}`, result: (m.safe || 0) - (m.out || 0) };
       }
       const supp = S.supp.has(m.i);
       if (m.orig || supp) {
@@ -188,6 +191,50 @@
     for (const sh of wb.worksheets) {
       sh.views = (sh.views && sh.views.length ? sh.views : [{}]).map(v => ({ ...v, tabSelected: sh === ws }));
     }
+
+    const buf = await wb.xlsx.writeBuffer();
+    return new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  };
+
+  // ハーフストロング：「対象機種・台数・台番」の表（ユーザーの見本 WB 10.25ハーフストロング.xlsx の形）＋ 全台データ
+  X.buildHalf = async function (S, title) {
+    const res = S.result;
+    const isMarked = m => m.orig || S.supp.has(m.i);
+    const half = new Set([...res.assign].filter(([, tag]) => tag === 'h1').map(([m]) => m.model));
+    const models = [...half].sort((a, b) => b.n - a.n);
+    const wb = new ExcelJS.Workbook();
+    const fill = solid(CFG.suppFill), yellow = solid('FFFFFF00'), head = solid('FFE7EAF0');
+    const bold = { bold: true };
+
+    const sh = wb.addWorksheet('ハーフストロング');
+    sh.columns = [{ width: 2 }, { width: 5 }, { width: 38 }, { width: 7 }, { width: 7 }, { width: 46 }];
+    sh.getCell('B2').value = title;
+    sh.getCell('B2').font = { bold: true, size: 13 };
+    const hr = sh.getRow(4);
+    ['', '', '対象機種', '台数', '⑤⑥', '台番'].forEach((v, i) => { if (v) hr.getCell(i + 1).value = v; });
+    for (let c = 2; c <= 6; c++) { setFill(hr.getCell(c), head); hr.getCell(c).font = bold; }
+    models.forEach((g, i) => {
+      const nos = g.units.filter(isMarked);
+      const row = sh.getRow(5 + i);
+      row.getCell(2).value = i + 1;
+      row.getCell(3).value = g.name;
+      row.getCell(4).value = g.n;
+      row.getCell(5).value = nos.length;
+      row.getCell(6).value = nos.map(m => m.no).join(' ');
+      if (nos.some(m => S.supp.has(m.i))) setFill(row.getCell(6), fill);
+    });
+
+    const all = wb.addWorksheet('全台データ');
+    all.columns = [{ width: 9 }, { width: 38 }, { width: 6 }, { width: 6 }, { width: 6 }, { width: 6 }, { width: 8 }, { width: 9 }];
+    const ah = all.addRow(['台番号', '機種名', '台数', '⑤⑥', 'BB', 'RB', 'G数', '差枚']);
+    ah.eachCell(c => { setFill(c, head); c.font = bold; });
+    all.views = [{ state: 'frozen', ySplit: 1 }];
+    for (const m of S.parsed.machines) {
+      const on = isMarked(m), supp = S.supp.has(m.i);
+      const row = all.addRow([m.no, m.name, m.model.n, on ? '⭕️' : '', m.bb, m.rb, m.games, m.diff]);
+      if (on) { setFill(row.getCell(1), supp ? fill : yellow); setFill(row.getCell(4), supp ? fill : yellow); }
+    }
+    all.autoFilter = `A1:H${S.parsed.machines.length + 1}`;
 
     const buf = await wb.xlsx.writeBuffer();
     return new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });

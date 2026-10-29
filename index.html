@@ -6,13 +6,13 @@
   <title>公約チェッカー</title>
   <meta name="robots" content="noindex">
   <!-- 更新したら ?v= の番号を変える（古いファイルがブラウザに残るのを防ぐ） -->
-  <link rel="stylesheet" href="css/style.css?v=20261016a">
+  <link rel="stylesheet" href="css/style.css?v=20261029a">
 </head>
 <body>
   <header class="topbar">
     <div class="topbar__inner">
       <h1>S級ホール調査 <span>公約チェッカー</span></h1>
-      <button id="btn-reset" class="btn btn--ghost" hidden>別のファイルを読み込む</button>
+      <button id="btn-reset" class="btn btn--ghost" hidden>最初の画面に戻る</button>
     </div>
   </header>
 
@@ -25,6 +25,21 @@
       <p class="drop__title">結果報告シート（Excel：.xlsx / .xls）をここにドロップ</p>
       <p class="drop__sub">またはクリックしてファイルを選択 ・ データはこのパソコンの中だけで処理されます</p>
       <p id="drop-error" class="drop__error" hidden></p>
+    </section>
+
+    <section id="pstart" class="pstart">
+      <h2 class="pstart__title">Excelが無いとき：pisionから始める</h2>
+      <p class="pstart__sub">店舗と日付を選んで全台のデータを読み込み、そのあと対象の台番号（メールの本文やファイル）を入れると、その台に色が付きます。</p>
+      <div class="pision__row" id="pstart-keyrow">
+        <label class="outname__field"><span>APIキー</span><input type="password" id="pstart-key" placeholder="pisionのAPIキー" autocomplete="off" spellcheck="false"></label>
+        <button class="btn btn--sm" id="pstart-key-save" type="button">保存</button>
+      </div>
+      <div class="pision__row">
+        <label class="outname__field pision__hall"><span>店舗</span><input type="search" id="pstart-hall" list="pision-halls" placeholder="店名で検索（例：ビックディッパー）" autocomplete="off"></label>
+        <label class="outname__field"><span>日付</span><input type="date" id="pstart-date"></label>
+        <button class="btn btn--primary" id="pstart-go" type="button">読み込む</button>
+      </div>
+      <div id="pstart-msg" class="pision__result" hidden></div>
     </section>
 
     <div id="app" hidden>
@@ -40,10 +55,26 @@
             <button class="type type--murasaki" data-type="murasaki" role="radio">紫</button>
             <button class="type type--aka" data-type="aka" role="radio">赤</button>
             <button class="type type--ao" data-type="ao" role="radio">青</button>
+            <button class="type type--half" data-type="half" role="radio">ハーフ</button>
           </div>
         </div>
       </section>
       <div id="warnings"></div>
+
+      <section id="targets" class="targets" hidden>
+        <div class="targets__head">
+          <span class="outname__label">対象の台番号で色を付ける</span>
+          <span id="tg-count" class="pision__badge"></span>
+        </div>
+        <textarea id="tg-text" rows="5" placeholder="例：&#10;・GOD：789-792/810/815-818&#10;・リコリコ：318/320/321/323&#10;（メールの本文をそのまま貼り付けて大丈夫です）"></textarea>
+        <div class="pision__row">
+          <button class="btn btn--primary btn--sm" id="tg-apply" type="button">色を付ける</button>
+          <button class="btn btn--sm" id="tg-file-btn" type="button">ファイルから読む</button>
+          <button class="btn btn--sm btn--ghost" id="tg-clear" type="button">色を全部消す</button>
+          <input type="file" id="tg-file" accept=".xlsx,.xls,.csv,.txt" hidden>
+        </div>
+        <div id="tg-result" class="pision__result" hidden></div>
+      </section>
 
       <section class="summary">
         <div id="summary-score" class="summary__score"></div>
@@ -137,6 +168,8 @@
             <li>「1/2」「1/5」「4%」「8%」は切り上げで数えます（例：13台の1/2は7台）。</li>
             <li>並びは、シート上で隣の行かつ台番号が連番の台です。島の端をまたいでいるかは判定できません。8台続けば4台並び2箇所と数えます。</li>
             <li>紫③（列）は判定しません。極⑤（分技営業）は判定項目に入れていません。</li>
+            <li>ハーフストロングは、2台以上設置の機種のうち、色を付けた台が半分以上（切り上げ。5台なら3台）の機種を数え、10機種で達成です。1台だけの機種に付けた色は数えません。</li>
+            <li>pisionから始めたときは、アウト・セーフが無いので、出率は G数×3 をアウト、アウト＋差枚をセーフとして推定します。</li>
             <li>114.9%機種は、DMMぱちタウンに載っている機械割の上限（最高設定の値）が114.9%以上の機種です。</li>
             <li>差枚はお客さん目線（プラス＝出た）です。ゲーム数の列がないシートは、G数をアウト÷3で推定して「約」を付けています。</li>
           </ul>
@@ -162,14 +195,15 @@
   <div id="toast" class="toast" hidden></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
-  <script src="js/config.js?v=20261016a"></script>
-  <script src="data/payout6.js?v=20261016a"></script>
-  <script src="js/parser.js?v=20261016a"></script>
-  <script src="js/rules.js?v=20261016a"></script>
-  <script src="js/export.js?v=20261016a"></script>
-  <script src="js/pision.js?v=20261016a"></script>
-  <script src="js/extdata.js?v=20261016a"></script>
-  <script src="js/rating.js?v=20261016b"></script>
-  <script src="js/app.js?v=20261016a"></script>
+  <script src="js/config.js?v=20261029a"></script>
+  <script src="data/payout6.js?v=20261029a"></script>
+  <script src="js/parser.js?v=20261029a"></script>
+  <script src="js/rules.js?v=20261029a"></script>
+  <script src="js/export.js?v=20261029a"></script>
+  <script src="js/pision.js?v=20261029a"></script>
+  <script src="js/extdata.js?v=20261029a"></script>
+  <script src="js/rating.js?v=20261029a"></script>
+  <script src="js/targets.js?v=20261029a"></script>
+  <script src="js/app.js?v=20261029a"></script>
 </body>
 </html>
